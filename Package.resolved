@@ -1,0 +1,25 @@
+{
+  "object": {
+    "pins": [
+      {
+        "package": "sebbu-ts-ds",
+        "repositoryURL": "https://github.com/MarSe32m/sebbu-ts-ds.git",
+        "state": {
+          "branch": "main",
+          "revision": "ca7faf46401c2077c5d9cdab1cabd8ffc978abb1",
+          "version": null
+        }
+      },
+      {
+        "package": "swift-atomics",
+        "repositoryURL": "https://github.com/apple/swift-atomics.git",
+        "state": {
+          "branch": "main",
+          "revision": "ca13c9bd7b71c26218dc0bdd65ba869abd5a78af",
+          "version": null
+        }
+      }
+    ]
+  },
+  "version": 1
+}
