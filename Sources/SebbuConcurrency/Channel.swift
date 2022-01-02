@@ -8,14 +8,22 @@
 import SebbuTSDS
 import DequeModule
 import Dispatch
+#if canImport(Atomics)
 import Atomics
+#endif
 import Foundation
 
 public final class Channel<Element>: @unchecked Sendable {
     //TODO: Implement ability to specify buffer size
     
+    #if canImport(Atomics)
     @usableFromInline
     internal let _lock = Spinlock()
+    #else
+    @usableFromInline
+    internal let _lock = NSLock()
+    #endif
+    
     
     @usableFromInline
     internal var _buffer = Deque<Element>()
