@@ -6,7 +6,7 @@
 
 import SebbuTSDS
 
-public struct TurnScheduler {
+public class TurnScheduler {
     private let timer: RepeatingTimer
     private let timeInterval: Double
     private let amount: Int
@@ -31,6 +31,13 @@ public struct TurnScheduler {
     public func wait() async {
         await withUnsafeContinuation { (continuation: UnsafeContinuation<Void, Never>) in
             queue.enqueue(continuation)
+        }
+    }
+    
+    //TODO: Is this necessary?
+    deinit {
+        queue.dequeueAll { continuation in
+            continuation.resume()
         }
     }
 }
