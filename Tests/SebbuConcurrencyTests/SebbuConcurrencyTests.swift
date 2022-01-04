@@ -79,7 +79,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     
     func testUnboundedBufferingStrategy() async throws {
         let channel = Channel<Int>(bufferingStrategy: .unbounded)
-        for _ in 0..<1_000_000 {
+        for _ in 0..<1_00 {
             let result = channel.send(1)
             guard case .enqueued(let remainingCapacity) = result else {
                 XCTFail("The send result wasn't 'enqueued'")
@@ -98,7 +98,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testDropOldestBufferingStrategy() async throws {
-        let maximumCapacity = Int.random(in: 100...1000)
+        let maximumCapacity = Int.random(in: 50...100)
         let channel = Channel<Int>(bufferingStrategy: .dropOldest(maxCapacity: maximumCapacity))
         for i in 1...maximumCapacity {
             let result = channel.send(i)
@@ -119,7 +119,7 @@ final class SebbuConcurrencyTests: XCTestCase {
             }
         }
         
-        for i in 1...100 {
+        for i in 1...maximumCapacity {
             guard let value = channel.tryReceive() else {
                 XCTFail("Couldn't receive item...")
                 break
@@ -138,7 +138,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testDropNewestBufferingStrategy() async throws {
-        let maximumCapacity = Int.random(in: 100...1000)
+        let maximumCapacity = Int.random(in: 50...100)
         let channel = Channel<Int>(bufferingStrategy: .dropNewest(maxCapacity: maximumCapacity))
         for i in 1...maximumCapacity {
             let result = channel.send(i)
@@ -160,7 +160,7 @@ final class SebbuConcurrencyTests: XCTestCase {
             }
         }
         
-        for i in 1...100 {
+        for i in 1...maximumCapacity {
             guard let value = channel.tryReceive() else {
                 XCTFail("Couldn't receive item...")
                 break
