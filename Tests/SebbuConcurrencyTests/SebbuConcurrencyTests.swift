@@ -11,7 +11,7 @@ final class SebbuConcurrencyTests: XCTestCase {
         }
         repeatingTimer.resume()
         for _ in 0..<100 {
-            RunLoop.main.run(mode: .default, before: .distantFuture)
+            let _ = RunLoop.main.run(mode: .default, before: .distantFuture)
         }
         XCTAssertEqual(counter, 100)
     }
