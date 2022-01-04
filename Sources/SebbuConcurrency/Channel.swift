@@ -7,11 +7,9 @@
 
 import SebbuTSDS
 import DequeModule
-import Dispatch
-#if canImport(Atomics)
-import Atomics
-#endif
+#if !canImport(Atomics)
 import Foundation
+#endif
 
 /// Channel is an object that can be used to communicate between tasks. Unlike AsyncStream,
 /// multiple tasks can send and receive items from the Channel.
@@ -78,7 +76,7 @@ public struct Channel<Element>: @unchecked Sendable {
     /// Receive an item. This method might suspend or return immediately.
     /// If the buffer is not empty, then the first item will be returned without suspending.
     /// If the buffer is empty and the channel hasn't been closed, this method suspends until
-    /// and item is sent to this channel. If the channel has been closed and the buffer is empty,
+    /// an item is sent to this channel. If the channel has been closed and the buffer is empty,
     /// then this method will return `nil` immediately.
     @inlinable
     public func receive() async -> Element? {
