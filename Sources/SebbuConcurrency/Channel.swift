@@ -91,7 +91,7 @@ public struct Channel<Element>: @unchecked Sendable {
 }
 
 extension Channel: AsyncSequence {
-    public struct Iterator: @unchecked Sendable, AsyncIteratorProtocol {
+    public struct Iterator: Sendable, AsyncIteratorProtocol {
         let _channelStorage: _ChannelStorage
         
         mutating public func next() async -> Element? {

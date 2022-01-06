@@ -177,4 +177,45 @@ final class SebbuConcurrencyTests: XCTestCase {
             XCTFail("The send result should have been 'closed'.")
         }
     }
+    
+    func testAsyncStreamWithPipe() async throws {
+        let (consumer, producer) = AsyncStream<Int>.pipe()
+        let producerTask = Task<Int, Never> {
+            var sum = 0
+            for _ in 0..<10000 {
+                let value = Int.random(in: -10...10)
+                sum += value
+                producer.yield(value)
+            }
+            producer.finish()
+            return sum
+        }
+        var finalSum = 0
+        for await value in consumer {
+            finalSum += value
+        }
+        let producerSum = await producerTask.value
+        XCTAssertEqual(finalSum, producerSum)
+    }
+    
+    func testAsyncSemaphore() async throws {
+        let semaphore = AsyncSemaphore()
+        var aquiredSemaphore = await semaphore.wait(for: 1_000_000)
+        XCTAssertFalse(aquiredSemaphore)
+        let tasks = (0..<10).map { _ in
+            Task<Void, Never> {
+                for _ in 0..<1000 {
+                    await semaphore.wait()
+                }
+            }
+        }
+        for _ in 0..<10 * 1000 {
+            semaphore.signal()
+        }
+        for task in tasks {
+            await task.value
+        }
+        aquiredSemaphore = await semaphore.wait(for: 1_000_000)
+        XCTAssertFalse(aquiredSemaphore)
+    }
 }
