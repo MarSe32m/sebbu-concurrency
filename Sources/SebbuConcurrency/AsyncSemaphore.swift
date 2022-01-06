@@ -20,12 +20,15 @@ public struct AsyncSemaphore: Sendable {
         _semaphore = _async_semaphore(count: count)
     }
     
-    /// Wait for or decrement the semaphore.
+    /// Waits for or decrements the semaphore. In the case of waiting, this function
+    /// suspends the current task and doesn't block the underlying thread.
     public func wait() async {
         await _semaphore.wait()
     }
     
     /// Wait for a certain amount of nanoseconds for the semaphore, or possibly decrement it.
+    /// In the case of waiting, this function suspends the current task and doesn't block the
+    /// underlying thread.
     public func wait(for nanoseconds: UInt64) async -> Bool {
         await _semaphore.wait(for: nanoseconds)
     }
@@ -50,8 +53,8 @@ extension AsyncSemaphore {
         
         final func wait() async {
             lock.lock()
-            if count > 0 {
-                count -= 1
+            count -= 1
+            if count >= 0 {
                 lock.unlock()
                 return
             }
@@ -65,8 +68,8 @@ extension AsyncSemaphore {
         
         final func wait(for nanoseconds: UInt64) async -> Bool {
             lock.lock()
-            if count > 0 {
-                count -= 1
+            count -= 1
+            if count >= 0 {
                 lock.unlock()
                 return true
             }
@@ -82,6 +85,7 @@ extension AsyncSemaphore {
                         waitingTasks.removeAll { (identifier, cont) in
                             if id == identifier {
                                 cont.resume(returning: false)
+                                self.count += 1
                                 return true
                             }
                             return false
@@ -98,7 +102,6 @@ extension AsyncSemaphore {
                 for _ in 0..<count {
                     if let continuation = waitingTasks.popFirst()?.continuation {
                         continuation.resume(returning: true)
-                        self.count -= 1
                     }
                 }
             }

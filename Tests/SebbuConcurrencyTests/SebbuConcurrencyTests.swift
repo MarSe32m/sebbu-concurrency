@@ -217,5 +217,9 @@ final class SebbuConcurrencyTests: XCTestCase {
         }
         aquiredSemaphore = await semaphore.wait(for: 1_000_000)
         XCTAssertFalse(aquiredSemaphore)
+        
+        semaphore.signal()
+        aquiredSemaphore = await semaphore.wait(for: 1_000_000)
+        XCTAssertTrue(aquiredSemaphore)
     }
 }
