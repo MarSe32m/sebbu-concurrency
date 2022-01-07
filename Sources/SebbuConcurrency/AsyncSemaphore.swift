@@ -5,7 +5,6 @@
 //  Created by Sebastian Toivonen on 6.1.2022.
 //
 
-import Foundation
 import DequeModule
 import SebbuTSDS
 
@@ -45,7 +44,7 @@ extension AsyncSemaphore {
         var count: Int
         var waitingTasks = Deque<(id: Int, continuation: UnsafeContinuation<Bool,Never>)>()
         var id = 0
-        let lock = NSLock()
+        let lock = Lock()
         
         init(count: Int) {
             self.count = count

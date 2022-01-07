@@ -7,9 +7,6 @@
 
 import SebbuTSDS
 import DequeModule
-#if !canImport(Atomics)
-import Foundation
-#endif
 
 /// Channel is an object that can be used to communicate between tasks. Unlike AsyncStream,
 /// multiple tasks can send and receive items from the Channel.
@@ -107,14 +104,14 @@ extension Channel: AsyncSequence {
 extension Channel {
     @usableFromInline
     internal final class _ChannelStorage: @unchecked Sendable {
-        //TODO: This is just for fun (it goes quite fast with the spinlock to be honest :). Consider implementing the lock without Foundation and remove the spinlock.
-        #if canImport(Atomics)
+        //TODO: Give the ability to specify if the users wants to use a spinlock, since in all benchmarking I have done show that it is much faster than the lock, even for the os_unfair_lock implementation
+        //#if canImport(Atomics)
+        //@usableFromInline
+        //internal let _lock = Spinlock()
+        //#else
+        
         @usableFromInline
-        internal let _lock = Spinlock()
-        #else
-        @usableFromInline
-        internal let _lock = NSLock()
-        #endif
+        internal let _lock = Lock()
 
         @usableFromInline
         internal var _buffer = Deque<Element>()
