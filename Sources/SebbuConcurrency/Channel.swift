@@ -217,10 +217,11 @@ extension Channel {
         }
 
         public final func receive() async -> Element? {
-            if let value = tryReceive() {
+            _lock.lock()
+            if let value = _buffer.popFirst() {
+                _lock.unlock()
                 return value
             }
-            _lock.lock()
             if _isClosed {
                 _lock.unlock()
                 return nil

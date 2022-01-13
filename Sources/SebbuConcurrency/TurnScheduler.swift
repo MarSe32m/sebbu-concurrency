@@ -34,10 +34,10 @@ public class TurnScheduler: @unchecked Sendable {
         }
     }
     
-    //TODO: Is this necessary?
     deinit {
         queue.dequeueAll { continuation in
             continuation.resume()
         }
+        timer.suspend()
     }
 }
