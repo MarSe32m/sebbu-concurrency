@@ -5,6 +5,7 @@
 //  Created by Sebastian Toivonen on 15.1.2022.
 //
 
+#if canImport(Atomics)
 import SebbuTSDS
 
 public extension ThreadPool {
@@ -17,3 +18,4 @@ public extension ThreadPool {
         }
     }
 }
+#endif

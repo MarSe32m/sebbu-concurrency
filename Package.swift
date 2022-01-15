@@ -26,7 +26,7 @@ let package = Package(
             name: "SebbuConcurrency",
             dependencies: [.product(name: "SebbuTSDS", package: "sebbu-ts-ds"),
                            .product(name: "DequeModule", package: "swift-collections"),
-                           .product(name: "Atomics", package: "swift-atomics")]),
+                           .product(name: "Atomics", package: "swift-atomics", condition: .when(platforms: [.macOS, .iOS, .tvOS, .watchOS, .linux]))]),
         .testTarget(
             name: "SebbuConcurrencyTests",
             dependencies: ["SebbuConcurrency"]),
