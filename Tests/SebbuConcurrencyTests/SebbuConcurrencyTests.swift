@@ -1,6 +1,7 @@
 import XCTest
 import SebbuConcurrency
 import Foundation
+import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase {
     func testRepeatingTimer() {
@@ -27,7 +28,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testChannelOneWriter() async throws {
-        let channel = Channel<Int>()
+        let channel = AsyncChannel<Int>()
         //FIXME: For some reason Windows crashes with more than 100 written items...
         #if !os(Windows)
         let writeCount = 100000
@@ -45,40 +46,46 @@ final class SebbuConcurrencyTests: XCTestCase {
         XCTAssertEqual(writeCount, readValue)
     }
     
-    func testChannel10Writers10Readers() async throws {
-        let channel = Channel<Int>()
+    func testChannelMultipleWritersMultipleReaders() async throws {
         //FIXME: For some reason Windows crashes with more than 100 written items per writer...
         #if !os(Windows)
         let writeCount = 100000
         #else
         let writeCount = 100
         #endif
-        let writerCount = 10
-        let readers = (0..<10).map {_ in
-            Task<Int, Never> {
-                return await channel.reduce(0, +)
-            }
-        }
-        let writers = (0..<10).map {_ in
-            Task<Void, Never> {
-                for _ in 0..<writeCount {
-                    channel.send(1)
+        
+        for writerCount in 1...10 {
+            for readerCount in 1...10 {
+                let channel = AsyncChannel<Int>()
+                let readers = (0..<readerCount).map {_ in
+                    Task<Int, Never> {
+                        return await channel.reduce(0, +)
+                    }
                 }
+                let writers = (0..<writerCount).map {_ in
+                    Task<Void, Never> {
+                        for _ in 0..<writeCount {
+                            channel.send(1)
+                        }
+                    }
+                }
+                for writer in writers {
+                    let _ = await writer.value
+                }
+                channel.close()
+                var totalSum = 0
+                for reader in readers {
+                    totalSum += await reader.value
+                }
+                XCTAssertEqual(writerCount * writeCount, totalSum)
+                XCTAssertNil(channel.tryReceive())
             }
         }
-        for writer in writers {
-            let _ = await writer.value
-        }
-        channel.close()
-        var totalSum = 0
-        for reader in readers {
-            totalSum += await reader.value
-        }
-        XCTAssertEqual(writerCount * writeCount, totalSum)
+        
     }
     
     func testUnboundedBufferingStrategy() async throws {
-        let channel = Channel<Int>(bufferingStrategy: .unbounded)
+        let channel = AsyncChannel<Int>(bufferingStrategy: .unbounded)
         for _ in 0..<1_00 {
             let result = channel.send(1)
             guard case .enqueued(let remainingCapacity) = result else {
@@ -99,7 +106,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     
     func testDropOldestBufferingStrategy() async throws {
         let maximumCapacity = Int.random(in: 50...100)
-        let channel = Channel<Int>(bufferingStrategy: .dropOldest(maxCapacity: maximumCapacity))
+        let channel = AsyncChannel<Int>(bufferingStrategy: .dropOldest(maxCapacity: maximumCapacity))
         for i in 1...maximumCapacity {
             let result = channel.send(i)
             guard case .enqueued(let remainingCapacity) = result else {
@@ -139,7 +146,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     
     func testDropNewestBufferingStrategy() async throws {
         let maximumCapacity = Int.random(in: 50...100)
-        let channel = Channel<Int>(bufferingStrategy: .dropNewest(maxCapacity: maximumCapacity))
+        let channel = AsyncChannel<Int>(bufferingStrategy: .dropNewest(maxCapacity: maximumCapacity))
         for i in 1...maximumCapacity {
             let result = channel.send(i)
             guard case .enqueued(let remainingCapacity) = result else {
@@ -221,5 +228,34 @@ final class SebbuConcurrencyTests: XCTestCase {
         semaphore.signal()
         aquiredSemaphore = await semaphore.wait(for: 1_000_000)
         XCTAssertTrue(aquiredSemaphore)
+    }
+    
+    func testThreadPool_runAsync() async {
+        actor Counter {
+            var value: Int = 0
+            init() {}
+            func increment(by: Int = 1) { value += by }
+            func fetch() -> Int { value }
+        }
+        #if canImport(Atomics)
+        let counter = Counter()
+        let threadPool = ThreadPool(numberOfThreads: 8)
+        let iterations = 100000
+        threadPool.start()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<10 {
+                group.addTask {
+                    for i in 0..<iterations {
+                        await counter.increment(by: threadPool.runAsync {
+                            return i
+                        })
+                    }
+                }
+            }
+        }
+        threadPool.stop()
+        let finalCount = await counter.fetch()
+        XCTAssertEqual(10 * (0..<iterations).reduce(0, +), finalCount)
+        #endif
     }
 }

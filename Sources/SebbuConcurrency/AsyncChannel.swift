@@ -1,5 +1,5 @@
 //
-//  Channel.swift
+//  AsyncChannel.swift
 //  
 //
 //  Created by Sebastian Toivonen on 2.1.2022.
@@ -10,7 +10,7 @@ import DequeModule
 
 /// Channel is an object that can be used to communicate between tasks. Unlike AsyncStream,
 /// multiple tasks can send and receive items from the Channel.
-public struct Channel<Element>: @unchecked Sendable {
+public struct AsyncChannel<Element>: @unchecked Sendable {
     public enum BufferingStrategy {
         /// Add the items to the buffer at no limit.
         case unbounded
@@ -35,7 +35,7 @@ public struct Channel<Element>: @unchecked Sendable {
     }
     
     @usableFromInline
-    internal let _storage: _ChannelStorage
+    internal let _storage: _AsyncChannelStorage
     
     /// Indicates wheter the channel has been closed.
     public var isClosed: Bool {
@@ -53,7 +53,7 @@ public struct Channel<Element>: @unchecked Sendable {
     }
     
     public init(bufferingStrategy: BufferingStrategy = .unbounded) {
-        _storage = _ChannelStorage(bufferingStrategy: bufferingStrategy)
+        _storage = _AsyncChannelStorage(bufferingStrategy: bufferingStrategy)
     }
     
     /// Send an item to the channel. Depending on the buffering strategy and the amount of items in the buffer,
@@ -87,9 +87,9 @@ public struct Channel<Element>: @unchecked Sendable {
     }
 }
 
-extension Channel: AsyncSequence {
+extension AsyncChannel: AsyncSequence {
     public struct Iterator: Sendable, AsyncIteratorProtocol {
-        let _channelStorage: _ChannelStorage
+        let _channelStorage: _AsyncChannelStorage
         
         mutating public func next() async -> Element? {
             await _channelStorage.receive()
@@ -101,15 +101,9 @@ extension Channel: AsyncSequence {
     }
 }
 
-extension Channel {
+extension AsyncChannel {
     @usableFromInline
-    internal final class _ChannelStorage: @unchecked Sendable {
-        //TODO: Give the ability to specify if the users wants to use a spinlock, since in all benchmarking I have done show that it is much faster than the lock, even for the os_unfair_lock implementation
-        //#if canImport(Atomics)
-        //@usableFromInline
-        //internal let _lock = Spinlock()
-        //#else
-        
+    internal final class _AsyncChannelStorage: @unchecked Sendable {
         @usableFromInline
         internal let _lock = Lock()
 

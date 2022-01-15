@@ -96,14 +96,14 @@ extension AsyncSemaphore {
         
         final func signal(count: Int = 1) {
             assert(count > 0)
-            lock.withLock {
-                self.count += count
-                for _ in 0..<count {
-                    if let continuation = waitingTasks.popFirst()?.continuation {
-                        continuation.resume(returning: true)
-                    }
+            lock.lock()
+            self.count += count
+            for _ in 0..<count {
+                if let continuation = waitingTasks.popFirst()?.continuation {
+                    continuation.resume(returning: true)
                 }
             }
+            lock.unlock()
         }
     }
 }
