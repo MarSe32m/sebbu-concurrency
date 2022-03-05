@@ -6,7 +6,7 @@
 
 import SebbuTSDS
 
-public class TurnScheduler: @unchecked Sendable {
+public final class TurnScheduler: @unchecked Sendable {
     private let timer: RepeatingTimer
     private let timeInterval: Double
     private let amount: Int

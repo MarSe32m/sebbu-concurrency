@@ -42,7 +42,7 @@ extension AsyncSemaphore {
     @usableFromInline
     internal final class _async_semaphore: @unchecked Sendable {
         var count: Int
-        var waitingTasks = Deque<(id: Int, continuation: UnsafeContinuation<Bool,Never>)>()
+        var waitingTasks = Deque<(id: Int, continuation: UnsafeContinuation<Bool,Never>, timeoutTask: Task<Void, Never>?)>()
         var id = 0
         let lock = Lock()
         
@@ -60,7 +60,7 @@ extension AsyncSemaphore {
             self.id += 1
             let id = self.id
             let _ = await withUnsafeContinuation { (cont: UnsafeContinuation<Bool, Never>) in
-                waitingTasks.append((id, cont))
+                waitingTasks.append((id, cont, nil))
                 lock.unlock()
             }
         }
@@ -75,13 +75,12 @@ extension AsyncSemaphore {
             self.id += 1
             let id = self.id
             return  await withUnsafeContinuation { (cont: UnsafeContinuation<Bool, Never>) in
-                waitingTasks.append((id, cont))
-                lock.unlock()
-                
-                Task {
-                    try? await Task.sleep(nanoseconds: nanoseconds)
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(nanoseconds: nanoseconds)
+                    } catch { return }
                     lock.withLock {
-                        waitingTasks.removeAll { (identifier, cont) in
+                        waitingTasks.removeAll { (identifier, cont, _) in
                             if id == identifier {
                                 cont.resume(returning: false)
                                 self.count += 1
@@ -91,6 +90,8 @@ extension AsyncSemaphore {
                         }
                     }
                 }
+                waitingTasks.append((id, cont, timeoutTask))
+                lock.unlock()
             }
         }
         
@@ -99,8 +100,11 @@ extension AsyncSemaphore {
             lock.lock()
             self.count += count
             for _ in 0..<count {
-                if let continuation = waitingTasks.popFirst()?.continuation {
+                if let (_, continuation, timeoutTask) = waitingTasks.popFirst() {
                     continuation.resume(returning: true)
+                    if let timeoutTask = timeoutTask {
+                        timeoutTask.cancel()
+                    }
                 }
             }
             lock.unlock()

@@ -227,11 +227,12 @@ extension AsyncChannel {
             return await withTaskCancellationHandler {
                 return await withUnsafeContinuation { (continuation: UnsafeContinuation<Element?, Never>) in
                     _consumers.append((id: id, continuation: continuation))
+                    // This is fine, since it is guaranteed that this closure is executed in the same context as the calling function and thus this doesn't switch threads.
                     _lock.unlock()
                 }
             } onCancel: {
                 // This way we ensure that the operation is perfomed before the cancel block.
-                // But this happens only on cancellation (which should be rare / not happen 1000 times per second)
+                // But this happens only on cancellation (which should be rare/not happen 1000 times per second)
                 // so I think this is a fine approach for now.
                 Task {
                     _lock.withLock {

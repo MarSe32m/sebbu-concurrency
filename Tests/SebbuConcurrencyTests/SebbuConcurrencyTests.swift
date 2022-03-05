@@ -4,6 +4,23 @@ import Foundation
 import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase {
+    func testRateLimiter() async {
+        let rateLimiter = RateLimiter(permits: 5000, per: 1)
+        let start = Date()
+        var remainingCount = 30000
+        while remainingCount > 0 {
+            var nextPermitCount = Int.random(in: 1...30000)
+            remainingCount -= nextPermitCount
+            if remainingCount < 0 {
+                nextPermitCount += remainingCount
+                remainingCount = 0
+            }
+            await rateLimiter.acquire(permits: nextPermitCount)
+        }
+        let end = Date()
+        XCTAssertGreaterThanOrEqual(start.distance(to: end), 5)
+    }
+    
     func testRepeatingTimer() {
         let repeatingTimer = RepeatingTimer(delta: 1 / 100.0, queue: .main)
         var counter = 0
@@ -257,5 +274,24 @@ final class SebbuConcurrencyTests: XCTestCase {
         let finalCount = await counter.fetch()
         XCTAssertEqual(10 * (0..<iterations).reduce(0, +), finalCount)
         #endif
+    }
+    
+    func testTaskGroupExtensions() async {
+        // Run 10 tasks at a time
+        let semaphore = AsyncSemaphore(count: 10)
+        let result = await withTaskGroup(of: Int.self, returning: Int.self, body: { group in
+            for i in 0..<10000 {
+                await group.addTask(with: semaphore) {
+                    i
+                }
+            }
+            for i in 0..<10000 {
+                await group.addTask(with: semaphore) {
+                    -i
+                }
+            }
+            return await group.reduce(0, +)
+        })
+        XCTAssertEqual(result, 0)
     }
 }
