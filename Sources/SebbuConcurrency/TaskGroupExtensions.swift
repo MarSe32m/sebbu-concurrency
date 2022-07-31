@@ -15,3 +15,14 @@ public extension TaskGroup {
         }
     }
 }
+
+public extension ThrowingTaskGroup {
+    /// Waits for the semaphore before the task is enqueued to the ThrowingTaskGroup
+    mutating func addTask(with semaphore: AsyncSemaphore, priority: TaskPriority? = nil, operation: @escaping @Sendable () async throws -> ChildTaskResult) async {
+        await semaphore.wait()
+        addTask(priority: priority) {
+            defer { semaphore.signal() }
+            return try await operation()
+        }
+    }
+}

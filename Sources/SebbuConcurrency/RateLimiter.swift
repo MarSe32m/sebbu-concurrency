@@ -9,6 +9,7 @@ import SebbuTSDS
 import Atomics
 import DequeModule
 
+//TODO: Reimplement. This should be a ratelimiter, not a turn scheduler. If there are no permits left, just throw an error or return false etc. 
 public class RateLimiter: @unchecked Sendable {
     internal struct Waiter {
         var permits: Int
@@ -74,6 +75,7 @@ public class RateLimiter: @unchecked Sendable {
             queue.enqueue(waiter)
         }
     }
+    
     deinit {
         timer.eventHandler = nil
         timer.suspend()

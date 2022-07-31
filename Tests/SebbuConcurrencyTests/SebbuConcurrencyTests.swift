@@ -50,6 +50,7 @@ final class SebbuConcurrencyTests: XCTestCase {
         #if !os(Windows)
         let writeCount = 100000
         #else
+        throw XCTSkip("Windows has some problems with Concurrency stuff...")
         let writeCount = 100
         #endif
         let reader = Task.detached {
@@ -68,6 +69,7 @@ final class SebbuConcurrencyTests: XCTestCase {
         #if !os(Windows)
         let writeCount = 100000
         #else
+        throw XCTSkip("Windows has some problems with Concurrency stuff...")
         let writeCount = 100
         #endif
         
@@ -293,5 +295,64 @@ final class SebbuConcurrencyTests: XCTestCase {
             return await group.reduce(0, +)
         })
         XCTAssertEqual(result, 0)
+    }
+    
+    func testManualTask() async throws {
+        #if canImport(Atomics)
+        do {
+            let task = ManualTask {
+                return 1
+            }
+            task.start()
+            let value1 = await task.value
+            XCTAssertEqual(1, value1)
+        }
+        do {
+            var tasks = [ManualTask<Int, Never>]()
+            for i in 0..<100 {
+                tasks.append(ManualTask {
+                    return i
+                })
+            }
+            for (i, task) in tasks.enumerated() {
+                for _ in 0..<100 {
+                    Task.detached {
+                        let value = await task.value
+                        XCTAssertEqual(i, value)
+                    }
+                }
+            }
+            tasks.forEach { $0.start() }
+        }
+        do {
+            var tasks = [ManualTask<Bool, Never>]()
+            for _ in 0..<100 {
+                tasks.append(ManualTask {
+                    do {
+                        try await Task.sleep(nanoseconds: 1_000_000_000)
+                    } catch {
+                        return true
+                    }
+                    return false
+                })
+            }
+            for task in tasks {
+                for _ in 0..<100 {
+                    Task.detached {
+                        let value = await task.value
+                        XCTAssertTrue(value)
+                    }
+                }
+            }
+            tasks.forEach {
+                $0.cancel()
+                $0.start()
+            }
+            for task in tasks {
+                let isCancelled = await task.value
+                XCTAssertTrue(isCancelled)
+            }
+        }
+        #endif
     }
 }
