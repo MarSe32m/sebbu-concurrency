@@ -4,8 +4,8 @@ import Foundation
 import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase {
-    func testRateLimiter() async {
-        let rateLimiter = RateLimiter(permits: 5000, per: 1)
+    func testRateLimiter() async throws {
+        let rateLimiter = RateLimiter(permits: 5000, per: 1, maxPermits: 30000)
         let start = Date()
         var remainingCount = 30000
         while remainingCount > 0 {
@@ -15,7 +15,11 @@ final class SebbuConcurrencyTests: XCTestCase {
                 nextPermitCount += remainingCount
                 remainingCount = 0
             }
-            await rateLimiter.acquire(permits: nextPermitCount)
+            do {
+                try rateLimiter.acquire(permits: nextPermitCount)
+            } catch {
+                remainingCount += nextPermitCount
+            }
         }
         let end = Date()
         XCTAssertGreaterThanOrEqual(start.distance(to: end), 5)
@@ -249,6 +253,50 @@ final class SebbuConcurrencyTests: XCTestCase {
         XCTAssertTrue(aquiredSemaphore)
     }
     
+    func testAsyncSemaphoreCancellation() async throws {
+        let semaphore = AsyncSemaphore()
+        var testTask = Task {
+            try await semaphore.waitUnlessCancelled()
+            return true
+        }
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        testTask.cancel()
+        do {
+            let _ = try await testTask.value
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        
+        testTask = Task {
+            try await semaphore.waitUnlessCancelled(for: 1_000_000_000)
+        }
+        let didAquireSemaphore = try await testTask.value
+        XCTAssertFalse(didAquireSemaphore)
+        
+        testTask = Task {
+            try await semaphore.waitUnlessCancelled(for: 10_000_000_000)
+        }
+        testTask.cancel()
+        do {
+            let _ = try await testTask.value
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        
+        testTask = Task {
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            try await semaphore.waitUnlessCancelled()
+            return true
+        }
+        do {
+            let _ = try await testTask.value
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
+    
     func testThreadPool_runAsync() async {
         actor Counter {
             var value: Int = 0
@@ -276,6 +324,30 @@ final class SebbuConcurrencyTests: XCTestCase {
         let finalCount = await counter.fetch()
         XCTAssertEqual(10 * (0..<iterations).reduce(0, +), finalCount)
         #endif
+    }
+    
+    func testDispatchQueue_runAsync() async {
+        actor Counter {
+            var value: Int = 0
+            init() {}
+            func increment(by: Int = 1) { value += by }
+            func fetch() -> Int { value }
+        }
+        let counter = Counter()
+        let iterations = 100000
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<10 {
+                group.addTask {
+                    for i in 0..<iterations {
+                        await counter.increment(by: DispatchQueue.global().runAsync {
+                            return i
+                        })
+                    }
+                }
+            }
+        }
+        let finalCount = await counter.fetch()
+        XCTAssertEqual(10 * (0..<iterations).reduce(0, +), finalCount)
     }
     
     func testTaskGroupExtensions() async {

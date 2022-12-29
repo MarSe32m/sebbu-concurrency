@@ -32,9 +32,7 @@ public final class TurnScheduler: @unchecked Sendable {
     
     @inlinable
     public func wait() async {
-        await withUnsafeContinuation { (continuation: UnsafeContinuation<Void, Never>) in
-            queue.enqueue(continuation)
-        }
+        await withUnsafeContinuation { queue.enqueue($0) }
     }
     
     deinit {

@@ -181,7 +181,7 @@ extension ManualTaskStorage {
         }
         
         var continuation: UnsafeContinuation<Void, Never>?
-        let state = ManagedAtomic<ContinuationState>(.notInitialized)
+        let state = UnsafeAtomic<ContinuationState>.create(.notInitialized)
         
         func set(_ continuation: UnsafeContinuation<Void, Never>) {
             assert(self.continuation == nil)
@@ -213,6 +213,11 @@ extension ManualTaskStorage {
             assert(continuation != nil)
             self.continuation?.resume()
             self.continuation = nil
+        }
+        
+        deinit {
+            assert(continuation == nil, "Continuation wasn't resumed before deinitializing the container...")
+            state.destroy()
         }
     }
 }
