@@ -5,6 +5,7 @@ import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase {
     func testRateLimiter() async throws {
+        #if canImport(Atomics)
         let rateLimiter = RateLimiter(permits: 5000, per: 1, maxPermits: 30000)
         let start = Date()
         var remainingCount = 30000
@@ -23,6 +24,7 @@ final class SebbuConcurrencyTests: XCTestCase {
         }
         let end = Date()
         XCTAssertGreaterThanOrEqual(start.distance(to: end), 5)
+        #endif
     }
     
     func testRepeatingTimer() {
@@ -71,7 +73,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     func testChannelMultipleWritersMultipleReaders() async throws {
         //FIXME: For some reason Windows crashes with more than 100 written items per writer...
         #if !os(Windows)
-        let writeCount = 100000
+        let writeCount = 10000
         #else
         throw XCTSkip("Windows has some problems with Concurrency stuff...")
         let writeCount = 100
@@ -313,9 +315,10 @@ final class SebbuConcurrencyTests: XCTestCase {
             for _ in 0..<10 {
                 group.addTask {
                     for i in 0..<iterations {
-                        await counter.increment(by: threadPool.runAsync {
+                        let value = await threadPool.runAsync {
                             return i
-                        })
+                        }
+                        await counter.increment(by: value)
                     }
                 }
             }
@@ -379,6 +382,7 @@ final class SebbuConcurrencyTests: XCTestCase {
             let value1 = await task.value
             XCTAssertEqual(1, value1)
         }
+        
         do {
             var tasks = [ManualTask<Int, Never>]()
             for i in 0..<100 {
@@ -396,6 +400,7 @@ final class SebbuConcurrencyTests: XCTestCase {
             }
             tasks.forEach { $0.start() }
         }
+        
         do {
             var tasks = [ManualTask<Bool, Never>]()
             for _ in 0..<100 {

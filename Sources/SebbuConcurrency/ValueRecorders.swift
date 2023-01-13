@@ -7,6 +7,7 @@
 
 #if canImport(Atomics)
 import Atomics
+
 public final class MinValueRecorder<T: AtomicInteger> {
     @usableFromInline
     internal let currentValue: UnsafeAtomic<T> = .create(.zero)

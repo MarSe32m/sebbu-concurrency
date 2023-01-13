@@ -31,6 +31,38 @@ public extension ThreadPool {
         }
     }
 }
+
+public extension BoundedThreadPool {
+    struct BoundedThreadPoolFullError: Error {}
+    
+    final func runAsync<T>(_ block: @escaping () -> T) async throws -> T {
+        try await withUnsafeThrowingContinuation { continuation in
+            let enqueued = run {
+                let result = block()
+                continuation.resume(returning: result)
+            }
+            if !enqueued {
+                continuation.resume(throwing: BoundedThreadPoolFullError())
+            }
+        }
+    }
+    
+    final func runAsync<T>(_ block: @escaping () throws -> T) async throws -> T {
+        try await withUnsafeThrowingContinuation { continuation in
+            let enqueued = run {
+                do {
+                    let result = try block()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+            if !enqueued {
+                continuation.resume(throwing: BoundedThreadPoolFullError())
+            }
+        }
+    }
+}
 #endif
 
 import Dispatch
