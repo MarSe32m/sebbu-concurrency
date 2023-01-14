@@ -1,0 +1,3 @@
+module ConcurrencyRuntimeC {
+    header "ConcurrencyRuntimeC.h"
+}

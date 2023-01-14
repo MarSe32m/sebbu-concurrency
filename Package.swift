@@ -16,7 +16,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-atomics.git", branch: "main")
     ],
     targets: [
-        .systemLibrary(name: "ConcurrencyRuntimeC"),
+        .target(name: "ConcurrencyRuntimeC"),
         .target(
             name: "SebbuConcurrency",
             dependencies: [.product(name: "SebbuTSDS", package: "sebbu-ts-ds"),
@@ -25,8 +25,7 @@ let package = Package(
                            .target(name: "ConcurrencyRuntimeC")]),
         .executableTarget(name: "DevelopmentTesting",
                           dependencies: [
-                            .target(name: "SebbuConcurrency"),
-                            .target(name: "ConcurrencyRuntimeC")
+                            .target(name: "SebbuConcurrency")
                           ]),
         .testTarget(
             name: "SebbuConcurrencyTests",

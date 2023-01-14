@@ -1,4 +1,0 @@
-module ConcurrencyRuntimeC [system] {
-    header "ConcurrencyRuntimeC.h"
-    export *
-}
