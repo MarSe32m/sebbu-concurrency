@@ -47,7 +47,9 @@ final class SebbuConcurrencyExecutorTests: XCTestCase {
                 }
             }
             let _ = await (task1.value, task2.value, task3.value)
+            #if canImport(Atomics)
             MultiThreadedGlobalExecutor.shared.reset()
+            #endif
         }
     }
     
