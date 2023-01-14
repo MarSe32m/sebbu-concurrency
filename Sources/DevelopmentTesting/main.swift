@@ -8,7 +8,7 @@
 import SebbuConcurrency
 import ConcurrencyRuntimeC
 import Foundation
-
+#if !os(Windows)
 MultiThreadedGlobalExecutor.shared.setup()
 print("Whast?")
 Task { @GlobAct in
@@ -50,3 +50,4 @@ Task {
 
 MultiThreadedGlobalExecutor.shared.run()
 print("hehe 2")
+#endif
