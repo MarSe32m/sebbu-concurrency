@@ -96,6 +96,9 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     internal let workCount: ManagedAtomic<Int> = ManagedAtomic(0)
     
     @usableFromInline
+    internal let nextTimedWorkDeadline: ManagedAtomic<UInt64> = ManagedAtomic(0)
+    
+    @usableFromInline
     internal let semaphore = DispatchSemaphore(value: 0)
     
     @usableFromInline
@@ -220,9 +223,8 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     }
 
     @inlinable
-    @discardableResult
-    internal func handleTimedWork() -> Int {
-        if handlingTimedWork.exchange(true, ordering: .acquiring) { return 0 }
+    internal func handleTimedWork() {
+        if handlingTimedWork.exchange(true, ordering: .acquiring) { return }
         defer { handlingTimedWork.store(false, ordering: .releasing) }
         
         // Move the enqueued work into the priority queue
@@ -234,13 +236,13 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
         let currentTime = DispatchTime.now().uptimeNanoseconds
         while let timedJob = timedWork.max() {
             if timedJob.deadline > currentTime {
-                return currentTime.distance(to: timedJob.deadline)
+                nextTimedWorkDeadline.store(timedJob.deadline, ordering: .relaxed)
+                return
             }
             let timedJob = timedWork.removeMax()
             // Enqueue the work to a worker thread
             enqueue(timedJob.job)
         }
-        return 0
     }
     
     internal func stop() {
@@ -291,10 +293,12 @@ final class Worker {
     public func run() {
         running.store(true, ordering: .relaxed)
         while running.load(ordering: .relaxed) {
+            executor.handleTimedWork()
             drainQueues()
-            let sleepTime = executor.handleTimedWork()
-            if _slowPath(sleepTime > 0) {
-                _ = executor.semaphore.wait(timeout: .now() + .nanoseconds(sleepTime))
+            // By exchanging only one thread will sleep
+            let deadline = executor.nextTimedWorkDeadline.exchange(0, ordering: .relaxed)
+            if _slowPath(deadline > 0) {
+                _ = executor.semaphore.wait(timeout: .init(uptimeNanoseconds: deadline))
             } else {
                 executor.semaphore.wait()
             }
@@ -322,6 +326,254 @@ final class Worker {
     
     public func stop() {
         running.store(false, ordering: .relaxed)
+        executor.semaphore.signal()
+    }
+    
+    deinit {
+        stop()
+    }
+}
+#else
+public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
+    @usableFromInline
+    internal let globalQueue: LockedQueue<UnownedJob> = LockedQueue(cacheSize: 1024)
+    
+    @usableFromInline
+    internal let mainQueue: MPSCQueue<UnownedJob> = MPSCQueue(cacheSize: 1024)
+    
+    @usableFromInline
+    internal let timedWorkQueue: MPSCQueue<TimedUnownedJob> = MPSCQueue<TimedUnownedJob>(cacheSize: 1024)
+    
+    @usableFromInline
+    internal var workers: [Worker] = []
+    
+    @usableFromInline
+    internal var timedWork: Heap<TimedUnownedJob> = Heap()
+    
+    @usableFromInline
+    internal let timedWorkHandlingLock: Lock = Lock()
+    
+    @usableFromInline
+    internal let semaphore = DispatchSemaphore(value: 0)
+    
+    @usableFromInline
+    internal let mainSemaphore = DispatchSemaphore(value: 0)
+    
+    @usableFromInline
+    internal var started: Bool = false
+    
+    @usableFromInline
+    internal let startedLock: Lock = Lock()
+    
+    @usableFromInline
+    internal let numberOfThreads: Int
+    
+    public static let shared = MultiThreadedGlobalExecutor()
+    
+    internal init() {
+        let coreCount = ProcessInfo.processInfo.activeProcessorCount - 1 > 0 ? ProcessInfo.processInfo.activeProcessorCount - 1 : 1
+        self.numberOfThreads = coreCount
+    }
+    
+    public func setup() {
+        swift_task_enqueueGlobal_hook = { job, _ in
+            let job = unsafeBitCast(job, to: UnownedJob.self)
+            MultiThreadedGlobalExecutor.shared.enqueue(job)
+        }
+        
+        swift_task_enqueueMainExecutor_hook = { job, _ in
+            let job = unsafeBitCast(job, to: UnownedJob.self)
+            MultiThreadedGlobalExecutor.shared.enqueueMain(job)
+        }
+        
+        swift_task_enqueueGlobalWithDelay_hook = { delay, job, _ in
+            let job = unsafeBitCast(job, to: UnownedJob.self)
+            MultiThreadedGlobalExecutor.shared.enqueue(job, delay: delay)
+        }
+        
+        swift_task_enqueueGlobalWithDeadline_hook = { sec, nsec, tsec, tnsec, clock, job, _ in
+            let job = unsafeBitCast(job, to: UnownedJob.self)
+            //TODO: Do something about threshold values tsec, tnsec
+            let deadline = sec * 1_000_000_000 + nsec
+            if deadline <= 0 {
+                MultiThreadedGlobalExecutor.shared.enqueue(job)
+            } else {
+                MultiThreadedGlobalExecutor.shared.enqueue(job, deadline: deadline.magnitude)
+            }
+        }
+        start()
+    }
+    
+    /// Reset the Swift Concurrency runtime hooks
+    public func reset() {
+        swift_task_enqueueGlobal_hook = nil
+        swift_task_enqueueMainExecutor_hook = nil
+        swift_task_enqueueGlobalWithDelay_hook = nil
+        swift_task_enqueueGlobalWithDeadline_hook = nil
+        stop()
+    }
+    
+    internal func start() {
+        startedLock.lock()
+        if started {
+            startedLock.unlock()
+            return
+        }
+        self.started = true
+        startedLock.unlock()
+        
+        for index in 1...numberOfThreads {
+            let worker = Worker(executor: self)
+            let thread = Thread {
+                worker.run()
+            }
+            thread.name = "SebbuConcurrency-cooperative-thread-\(index)"
+            workers.append(worker)
+            thread.start()
+        }
+    }
+    
+    /// Drains the main queue
+    public func run() {
+        while true {
+            let started = startedLock.withLock {
+                self.started
+            }
+            if !started { break }
+            if let job = mainQueue.dequeue() {
+                job._runSynchronously(on: _getCurrentExecutor())
+                //_swiftJobRun(job, _getCurrentExecutor())
+            }
+            mainSemaphore.wait()
+        }
+        // Drain the last work
+        while let job = mainQueue.dequeue() {
+            job._runSynchronously(on: _getCurrentExecutor())
+        }
+    }
+    
+    /// Processes one job on the main queue and returns if something was processed
+    @discardableResult
+    public func runOnce() -> Bool {
+        if let job = mainQueue.dequeue() {
+            job._runSynchronously(on: _getCurrentExecutor())
+            //_swiftJobRun(job, _getCurrentExecutor())
+            return true
+        }
+        return false
+    }
+    
+    @inlinable
+    public func enqueue(_ job: UnownedJob) {
+        assert({startedLock.withLock { self.started }}(), "The ThreadPool wasn't started before blocks were submitted!")
+        assert(!workers.isEmpty)
+        globalQueue.enqueue(job)
+        semaphore.signal()
+    }
+    
+    @inline(__always)
+    internal func enqueueMain(_ job: UnownedJob) {
+        mainQueue.enqueue(job)
+        mainSemaphore.signal()
+    }
+        
+    @inline(__always)
+    internal func enqueue(_ job: UnownedJob, delay: UInt64) {
+        let deadline = DispatchTime.now().uptimeNanoseconds + delay
+        enqueue(job, deadline: deadline)
+    }
+    
+    @inline(__always)
+    internal func enqueue(_ job: UnownedJob, deadline: UInt64) {
+        let timedJob = TimedUnownedJob(job: job, deadline: deadline)
+        timedWorkQueue.enqueue(timedJob)
+        semaphore.signal()
+    }
+
+    @inlinable
+    @discardableResult
+    internal func handleTimedWork() -> UInt64 {
+        if !timedWorkHandlingLock.tryLock() { return 0 }
+        defer { timedWorkHandlingLock.unlock() }
+        
+        // Move the enqueued work into the priority queue
+        for work in timedWorkQueue {
+            timedWork.insert(work)
+        }
+        
+        // Process the priority queue
+        let currentTime = DispatchTime.now().uptimeNanoseconds
+        while let timedJob = timedWork.max() {
+            if timedJob.deadline > currentTime {
+                return timedJob.deadline
+            }
+            let timedJob = timedWork.removeMax()
+            // Enqueue the work to a worker thread
+            enqueue(timedJob.job)
+        }
+        return 0
+    }
+    
+    internal func stop() {
+        startedLock.withLock {
+            self.started = false
+        }
+        workers.forEach { $0.stop() }
+        workers.removeAll()
+        mainSemaphore.signal()
+    }
+}
+
+@usableFromInline
+final class Worker {
+    @usableFromInline
+    var running: Bool = false
+    
+    @usableFromInline
+    let runningLock: Lock = Lock()
+    
+    @usableFromInline
+    let executor: MultiThreadedGlobalExecutor
+    
+    init(executor: MultiThreadedGlobalExecutor) {
+        self.executor = executor
+    }
+    
+    @inlinable
+    public func run() {
+        runningLock.withLock {
+            running = true
+        }
+        
+        while true {
+            if !runningLock.withLock({
+                running
+            }) { break }
+            drainQueues()
+            let deadline = executor.handleTimedWork()
+            if _slowPath(deadline > 0) {
+                _ = executor.semaphore.wait(timeout: .init(uptimeNanoseconds: deadline))
+            } else {
+                executor.semaphore.wait()
+            }
+        }
+        // Drain the queues one last time
+        drainQueues()
+    }
+    
+    @inline(__always)
+    @usableFromInline
+    internal func drainQueues() {
+        while let job = executor.globalQueue.dequeue() {
+            job._runSynchronously(on: _getCurrentExecutor())
+            executor.handleTimedWork()
+        }
+    }
+    
+    public func stop() {
+        runningLock.withLock {
+            running = false
+        }
         executor.semaphore.signal()
     }
     
