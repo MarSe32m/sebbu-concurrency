@@ -46,6 +46,7 @@ public final class SingleThreadedGlobalExecutor: @unchecked Sendable, SerialExec
         }
         
         swift_task_enqueueMainExecutor_hook = { job, _ in
+            print("main")
             let job = unsafeBitCast(job, to: UnownedJob.self)
             SingleThreadedGlobalExecutor.shared.enqueue(job)
         }
@@ -149,34 +150,8 @@ public final class SingleThreadedGlobalExecutor: @unchecked Sendable, SerialExec
     @usableFromInline
     internal func processJob() {
         if let job = work.popFirst() {
-            _swiftJobRun(job, asUnownedSerialExecutor())
-        }
-    }
-}
-
-extension SingleThreadedGlobalExecutor {
-    @usableFromInline
-    internal struct TimedUnownedJob: Comparable {
-        @usableFromInline
-        let job: UnownedJob
-        
-        @usableFromInline
-        let deadline: UInt64
-        
-        @inlinable
-        internal init(job: UnownedJob, deadline: UInt64) {
-            self.job = job
-            self.deadline = deadline
-        }
-        
-        @usableFromInline
-        internal static func < (lhs: SingleThreadedGlobalExecutor.TimedUnownedJob, rhs: SingleThreadedGlobalExecutor.TimedUnownedJob) -> Bool {
-            lhs.deadline < rhs.deadline
-        }
-        
-        @usableFromInline
-        internal static func == (lhs: SingleThreadedGlobalExecutor.TimedUnownedJob, rhs: SingleThreadedGlobalExecutor.TimedUnownedJob) -> Bool {
-            lhs.deadline == rhs.deadline
+            job._runSynchronously(on: asUnownedSerialExecutor())
+            //_swiftJobRun(job, asUnownedSerialExecutor())
         }
     }
 }

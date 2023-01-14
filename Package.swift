@@ -16,13 +16,18 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-atomics.git", branch: "main")
     ],
     targets: [
-        .target(name: "ConcurrencyRuntimeC"),
+        .systemLibrary(name: "ConcurrencyRuntimeC"),
         .target(
             name: "SebbuConcurrency",
             dependencies: [.product(name: "SebbuTSDS", package: "sebbu-ts-ds"),
                            .product(name: "DequeModule", package: "swift-collections"),
                            .product(name: "Atomics", package: "swift-atomics", condition: .when(platforms: [.macOS, .iOS, .tvOS, .watchOS, .linux])),
                            .target(name: "ConcurrencyRuntimeC")]),
+        .executableTarget(name: "DevelopmentTesting",
+                          dependencies: [
+                            .target(name: "SebbuConcurrency"),
+                            .target(name: "ConcurrencyRuntimeC")
+                          ]),
         .testTarget(
             name: "SebbuConcurrencyTests",
             dependencies: ["SebbuConcurrency"]),
