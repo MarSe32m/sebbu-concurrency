@@ -47,9 +47,7 @@ final class SebbuConcurrencyExecutorTests: XCTestCase {
                 }
             }
             let _ = await (task1.value, task2.value, task3.value)
-            #if canImport(Atomics)
             MultiThreadedGlobalExecutor.shared.reset()
-            #endif
         }
     }
     
@@ -62,11 +60,9 @@ final class SebbuConcurrencyExecutorTests: XCTestCase {
     
     
     func testMultiThreadedGlobalExecutor() {
-        #if canImport(Atomics)
         MultiThreadedGlobalExecutor.shared.setup()
         defer { MultiThreadedGlobalExecutor.shared.reset() }
         executorTests()
         MultiThreadedGlobalExecutor.shared.run()
-        #endif
     }
 }
