@@ -11,7 +11,7 @@ import HeapModule
 import SebbuTSDS
 import ConcurrencyRuntimeC
 
-#if canImport(Atomicss)
+#if canImport(Atomics)
 import Atomics
 
 @usableFromInline
