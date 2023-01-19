@@ -11,18 +11,19 @@ import Foundation
 #if !os(Windows)
 MultiThreadedGlobalExecutor.shared.setup()
 print("Whast?")
-Task { @GlobAct in
-    print("Hello from mainActor!")
-}
-Task { @GlobAct in
-    print("Actually hello from global actor!")
-}
-
 @globalActor
 struct GlobAct {
     actor ActorType {}
     
     static var shared: ActorType = ActorType()
+}
+
+
+Task { @GlobAct in
+    print("Hello from mainActor!")
+}
+Task { @GlobAct in
+    print("Actually hello from global actor!")
 }
 
 func mainActorFunc() async {

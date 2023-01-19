@@ -11,7 +11,7 @@ import HeapModule
 import SebbuTSDS
 import ConcurrencyRuntimeC
 
-#if canImport(Atomics)
+#if canImport(Atomicss)
 import Atomics
 
 @usableFromInline
@@ -20,11 +20,15 @@ internal final class Queue {
     let workQueue: MPSCQueue<UnownedJob>
     
     @usableFromInline
-    let processing: ManagedAtomic<Bool>
+    let processing: UnsafeAtomic<Bool>
     
     init(cacheSize: Int = 4096) {
         self.workQueue = MPSCQueue(cacheSize: cacheSize)
-        self.processing = ManagedAtomic(false)
+        self.processing = .create(false)
+    }
+    
+    deinit {
+        processing.destroy()
     }
     
     @inlinable
@@ -84,19 +88,19 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     internal var timedWork: Heap<TimedUnownedJob> = Heap()
     
     @usableFromInline
-    internal let workerIndex: ManagedAtomic<Int> = ManagedAtomic(0)
+    internal let workerIndex: UnsafeAtomic<Int> = .create(0)
     
     @usableFromInline
-    internal let handlingTimedWork: ManagedAtomic<Bool> = ManagedAtomic(false)
+    internal let handlingTimedWork: UnsafeAtomic<Bool> = .create(false)
     
     @usableFromInline
-    internal let queueIndex: ManagedAtomic<Int> = ManagedAtomic(0)
+    internal let queueIndex: UnsafeAtomic<Int> = .create(0)
     
     @usableFromInline
-    internal let workCount: ManagedAtomic<Int> = ManagedAtomic(0)
+    internal let workCount: UnsafeAtomic<Int> = .create(0)
     
     @usableFromInline
-    internal let nextTimedWorkDeadline: ManagedAtomic<UInt64> = ManagedAtomic(0)
+    internal let nextTimedWorkDeadline: UnsafeAtomic<UInt64> = .create(0)
     
     @usableFromInline
     internal let semaphore = DispatchSemaphore(value: 0)
@@ -105,9 +109,19 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     internal let mainSemaphore = DispatchSemaphore(value: 0)
     
     @usableFromInline
-    internal let started: ManagedAtomic<Bool> = ManagedAtomic(false)
+    internal let started: UnsafeAtomic<Bool> = .create(false)
     
     public static let shared = MultiThreadedGlobalExecutor()
+    
+    deinit {
+        workerIndex.destroy()
+        handlingTimedWork.destroy()
+        queueIndex.destroy()
+        workCount.destroy()
+        nextTimedWorkDeadline.destroy()
+        started.destroy()
+    }
+    
     
     internal init() {
         let coreCount = ProcessInfo.processInfo.activeProcessorCount - 1 > 0 ? ProcessInfo.processInfo.activeProcessorCount - 1 : 1
@@ -274,9 +288,9 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
 }
 
 @usableFromInline
-final class Worker {
+final class Worker: @unchecked Sendable, SerialExecutor {
     @usableFromInline
-    let running: ManagedAtomic<Bool> = ManagedAtomic(false)
+    let running: UnsafeAtomic<Bool> = .create(false)
     
     @usableFromInline
     let executor: MultiThreadedGlobalExecutor
@@ -316,12 +330,22 @@ final class Worker {
                 let queue = executor.queues[(queueIndex + i) % numberOfQueues]
                 while let job = queue.dequeue() {
                     executor.workCount.wrappingDecrement(ordering: .relaxed)
-                    job._runSynchronously(on: _getCurrentExecutor())
+                    job._runSynchronously(on: asUnownedSerialExecutor())
                     //_swiftJobRun(job, _getCurrentExecutor())
                     executor.handleTimedWork()
                 }
             }
         } while executor.workCount.load(ordering: .relaxed) > 0
+    }
+    
+    @inlinable
+    public func enqueue(_ job: UnownedJob) {
+        executor.enqueue(job)
+    }
+    
+    @inlinable
+    public func asUnownedSerialExecutor() -> UnownedSerialExecutor {
+        UnownedSerialExecutor(ordinary: self)
     }
     
     public func stop() {
@@ -331,6 +355,7 @@ final class Worker {
     
     deinit {
         stop()
+        running.destroy()
     }
 }
 #else
@@ -525,7 +550,7 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
 }
 
 @usableFromInline
-final class Worker {
+final class Worker: @unchecked Sendable, SerialExecutor {
     @usableFromInline
     var running: Bool = false
     
@@ -565,9 +590,18 @@ final class Worker {
     @usableFromInline
     internal func drainQueues() {
         while let job = executor.globalQueue.dequeue() {
-            job._runSynchronously(on: _getCurrentExecutor())
+            job._runSynchronously(on: asUnownedSerialExecutor())
             executor.handleTimedWork()
         }
+    }
+    
+    @inlinable
+    public func enqueue(_ job: UnownedJob) {
+        executor.enqueue(job)
+    }
+    
+    public func asUnownedSerialExecutor() -> UnownedSerialExecutor {
+        return UnownedSerialExecutor(ordinary: self)
     }
     
     public func stop() {
