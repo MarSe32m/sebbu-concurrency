@@ -46,7 +46,6 @@ public final class SingleThreadedGlobalExecutor: @unchecked Sendable, SerialExec
         }
         
         swift_task_enqueueMainExecutor_hook = { job, _ in
-            print("main")
             let job = unsafeBitCast(job, to: UnownedJob.self)
             SingleThreadedGlobalExecutor.shared.enqueue(job)
         }

@@ -11,9 +11,8 @@ import SebbuTSDS
 
 final class SebbuConcurrencyExecutorTests: XCTestCase {
     private func executorTests() {
-        //TODO: Test MainActor enqueueing as well...
-        Task {
-            let task1 = Task {
+        Task { @MainActor in
+            let task1 = Task.detached {
                 let value = await withTaskGroup(of: Int.self) { group in
                     for i in 0..<10_000 {
                         group.addTask {
@@ -26,7 +25,7 @@ final class SebbuConcurrencyExecutorTests: XCTestCase {
                 }
                 XCTAssertEqual(value, (0..<10_000).reduce(0, +) + 10_000)
             }
-            let task2 = Task {
+            let task2 = Task.detached {
                 let tasks = (0..<10_000).map { i in
                     Task.detached {
                         return i * i
@@ -39,14 +38,47 @@ final class SebbuConcurrencyExecutorTests: XCTestCase {
                 }
                 XCTAssertEqual(sum, 0)
             }
-            let task3 = Task {
+            let task3 = Task.detached {
                 await withUnsafeContinuation { continuation in
                     Task.detached {
                         continuation.resume()
                     }
                 }
             }
-            let _ = await (task1.value, task2.value, task3.value)
+            let task1Main = Task { @MainActor in
+                let value = await withTaskGroup(of: Int.self) { group in
+                    for i in 0..<10_000 {
+                        group.addTask {
+                            try! await Task.sleep(nanoseconds: 1_000_000_000)
+                            await Task.yield()
+                            return i + 1
+                        }
+                    }
+                    return await group.reduce(0, +)
+                }
+                XCTAssertEqual(value, (0..<10_000).reduce(0, +) + 10_000)
+            }
+            let task2Main = Task { @MainActor in
+                let tasks = (0..<10_000).map { i in
+                    Task.detached {
+                        return i * i
+                    }
+                }
+                var sum = 0
+                for (i, task) in tasks.enumerated() {
+                    sum += i * i
+                    sum -= await task.value
+                }
+                XCTAssertEqual(sum, 0)
+            }
+            let task3Main = Task { @MainActor in
+                await withUnsafeContinuation { continuation in
+                    Task.detached {
+                        continuation.resume()
+                    }
+                }
+            }
+            let _ = await (task1.value, task2.value, task3.value, task1Main.value, task2Main.value, task3Main.value)
             MultiThreadedGlobalExecutor.shared.reset()
         }
     }
