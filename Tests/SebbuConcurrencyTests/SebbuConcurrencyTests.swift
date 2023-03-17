@@ -53,7 +53,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     func testChannelOneWriter() async throws {
         let channel = AsyncChannel<Int>()
         //FIXME: For some reason Windows crashes with more than 100 written items...
-        #if !os(Windows)
+        #if os(Windows)
         let writeCount = 100000
         #else
         throw XCTSkip("Windows has some problems with Concurrency stuff...")
@@ -72,11 +72,11 @@ final class SebbuConcurrencyTests: XCTestCase {
     
     func testChannelMultipleWritersMultipleReaders() async throws {
         //FIXME: For some reason Windows crashes with more than 100 written items per writer...
-        #if !os(Windows)
+        #if os(Windows)
         let writeCount = 10000
         #else
-        throw XCTSkip("Windows has some problems with Concurrency stuff...")
-        let writeCount = 100
+        //throw XCTSkip("Windows has some problems with Concurrency stuff...")
+        let writeCount = 10000
         #endif
         
         for writerCount in 1...10 {
@@ -353,8 +353,8 @@ final class SebbuConcurrencyTests: XCTestCase {
         XCTAssertEqual(10 * (0..<iterations).reduce(0, +), finalCount)
     }
     
-    func testTaskGroupExtensions() async {
-        // Run 10 tasks at a time
+    func testTaskGroupExtensions() async throws {
+        // Run 10 tasks at a time        
         let semaphore = AsyncSemaphore(count: 10)
         let result = await withTaskGroup(of: Int.self, returning: Int.self, body: { group in
             for i in 0..<10000 {
