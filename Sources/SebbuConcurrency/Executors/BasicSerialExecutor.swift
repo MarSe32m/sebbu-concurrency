@@ -58,7 +58,7 @@ public final class BasicPriorityAwareSerialExecutor: @unchecked Sendable, Serial
     
     /// Returns a new BasicSerialExecutor with a detached thread responsible for running the executors jobs
     public static func withDetachedThread() -> BasicPriorityAwareSerialExecutor {
-        let executor = BasicSerialExecutor(detached: true)
+        let executor = BasicPriorityAwareSerialExecutor(detached: true)
         Thread.detachNewThread {
             executor._loopDetached()
         }
