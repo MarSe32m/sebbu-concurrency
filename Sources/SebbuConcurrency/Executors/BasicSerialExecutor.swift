@@ -111,7 +111,7 @@ public final class BasicPriorityAwareSerialExecutor: @unchecked Sendable, Serial
         UnownedSerialExecutor(ordinary: self)
     }
 }
-#else
+#endif
 /// Basic serial executor implementation to allow actors to run on custom threads.
 /// This executor doesn't take into account the job priority
 public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
@@ -196,4 +196,3 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
         UnownedSerialExecutor(ordinary: self)
     }
 }
-#endif
