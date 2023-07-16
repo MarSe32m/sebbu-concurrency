@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: windows-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
          - tag: 5.8.1-RELEASE
