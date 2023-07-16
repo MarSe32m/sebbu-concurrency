@@ -30,12 +30,12 @@ public final class BasicPriorityAwareSerialExecutor: @unchecked Sendable, Serial
         }
         
         @inlinable
-        static func < (lhs: BasicSerialExecutor._UnownedJob, rhs: BasicSerialExecutor._UnownedJob) -> Bool {
+        static func < (lhs: BasicPriorityAwareSerialExecutor._UnownedJob, rhs: BasicPriorityAwareSerialExecutor._UnownedJob) -> Bool {
             lhs.underlying.priority < rhs.underlying.priority
         }
         
         @inlinable
-        static func == (lhs: BasicSerialExecutor._UnownedJob, rhs: BasicSerialExecutor._UnownedJob) -> Bool {
+        static func == (lhs: BasicPriorityAwareSerialExecutor._UnownedJob, rhs: BasicPriorityAwareSerialExecutor._UnownedJob) -> Bool {
             lhs.underlying.priority == rhs.underlying.priority
         }
     }
@@ -57,7 +57,7 @@ public final class BasicPriorityAwareSerialExecutor: @unchecked Sendable, Serial
     }
     
     /// Returns a new BasicSerialExecutor with a detached thread responsible for running the executors jobs
-    public static func withDetachedThread() -> BasicSerialExecutor {
+    public static func withDetachedThread() -> BasicPriorityAwareSerialExecutor {
         let executor = BasicSerialExecutor(detached: true)
         Thread.detachNewThread {
             executor._loopDetached()
