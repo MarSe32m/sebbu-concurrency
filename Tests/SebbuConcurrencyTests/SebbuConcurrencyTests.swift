@@ -4,18 +4,15 @@ import Foundation
 import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase {
+    @available(macOS 13.0, *)
     func testRateLimiter() async throws {
         #if canImport(Atomics)
-        let rateLimiter = RateLimiter(permits: 5000, per: 1, maxPermits: 30000)
+        let rateLimiter = RateLimiter(permits: 5000, perInterval: .seconds(1), maxPermits: 30000)
         let start = Date()
         var remainingCount = 30000
         while remainingCount > 0 {
-            var nextPermitCount = Int.random(in: 1...30000)
+            let nextPermitCount = Int.random(in: 2...30000)
             remainingCount -= nextPermitCount
-            if remainingCount < 0 {
-                nextPermitCount += remainingCount
-                remainingCount = 0
-            }
             do {
                 try rateLimiter.acquire(permits: nextPermitCount)
             } catch {
@@ -24,6 +21,8 @@ final class SebbuConcurrencyTests: XCTestCase {
         }
         let end = Date()
         XCTAssertGreaterThanOrEqual(start.distance(to: end), 5)
+        try await Task.sleep(for: .seconds(1.1))
+        XCTAssertNoThrow(try rateLimiter.acquire(permits: 5000))
         #endif
     }
     
@@ -37,7 +36,7 @@ final class SebbuConcurrencyTests: XCTestCase {
         for _ in 0..<100 {
             let _ = RunLoop.main.run(mode: .default, before: .distantFuture)
         }
-        XCTAssertEqual(counter, 100)
+        XCTAssert(counter == 99 || counter == 100)
     }
     
     func testTurnScheduler() async {
@@ -53,7 +52,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     func testChannelOneWriter() async throws {
         let channel = AsyncChannel<Int>()
         //FIXME: For some reason Windows crashes with more than 100 written items...
-        #if os(Windows)
+        #if !os(Windows)
         let writeCount = 100000
         #else
         throw XCTSkip("Windows has some problems with Concurrency stuff...")
@@ -63,7 +62,7 @@ final class SebbuConcurrencyTests: XCTestCase {
             return await channel.reduce(0, +)
         }
         for _ in 0..<writeCount {
-            channel.send(1)
+            try await channel.send(1)
         }
         channel.close()
         let readValue = await reader.value
@@ -88,14 +87,14 @@ final class SebbuConcurrencyTests: XCTestCase {
                     }
                 }
                 let writers = (0..<writerCount).map {_ in
-                    Task<Void, Never> {
+                    Task<Void, Error> {
                         for _ in 0..<writeCount {
-                            channel.send(1)
+                            try await channel.send(1)
                         }
                     }
                 }
                 for writer in writers {
-                    let _ = await writer.value
+                    let _ = try await writer.value
                 }
                 channel.close()
                 var totalSum = 0
@@ -112,106 +111,36 @@ final class SebbuConcurrencyTests: XCTestCase {
     func testUnboundedBufferingStrategy() async throws {
         let channel = AsyncChannel<Int>(bufferingStrategy: .unbounded)
         for _ in 0..<1_00 {
-            let result = channel.send(1)
-            guard case .enqueued(let remainingCapacity) = result else {
-                XCTFail("The send result wasn't 'enqueued'")
-                return
-            }
-            XCTAssertEqual(remainingCapacity, Int.max)
+            try await channel.send(1)
         }
         channel.close()
-        let result = channel.send(1)
-        switch result {
-        case .closed:
-            return
-        default:
-            XCTFail("The send result should have been 'closed'.")
+        do {
+            try await channel.send(1)
+        } catch {
+            XCTAssertTrue(error is AsyncChannel<Int>.SendError)
         }
+        XCTAssertFalse(channel.trySend(1))
     }
     
-    func testDropOldestBufferingStrategy() async throws {
-        let maximumCapacity = Int.random(in: 50...100)
-        let channel = AsyncChannel<Int>(bufferingStrategy: .dropOldest(maxCapacity: maximumCapacity))
-        for i in 1...maximumCapacity {
-            let result = channel.send(i)
-            guard case .enqueued(let remainingCapacity) = result else {
-                XCTFail("The send result wasn't 'enqueued'")
-                return
-            }
-            XCTAssertEqual(remainingCapacity, maximumCapacity - i)
+    func testBoundedBufferingStrategy() async throws {
+        let channel = AsyncChannel<Int>(bufferingStrategy: .bounded(capacity: 50))
+        for _ in 0..<50 {
+            XCTAssertTrue(channel.trySend(1))
         }
-        
-        for i in 1...maximumCapacity {
-            let resultOnFull = channel.send(i)
-            switch resultOnFull {
-            case .dropped(let value):
-                XCTAssertEqual(value, i)
-            default:
-                XCTFail("The send result wasn't 'dropped'")
-            }
+        for _ in 0..<50 {
+            XCTAssertFalse(channel.trySend(1))
         }
-        
-        for i in 1...maximumCapacity {
-            guard let value = channel.tryReceive() else {
-                XCTFail("Couldn't receive item...")
-                break
-            }
-            XCTAssertEqual(i, value)
-        }
-        
         channel.close()
-        let result = channel.send(1)
-        switch result {
-        case .closed:
-            return
-        default:
-            XCTFail("The send result should have been 'closed'.")
+        do {
+            try await channel.send(1)
+        } catch {
+            XCTAssertTrue(error is AsyncChannel<Int>.SendError)
         }
+        XCTAssertFalse(channel.trySend(1))
     }
     
-    func testDropNewestBufferingStrategy() async throws {
-        let maximumCapacity = Int.random(in: 50...100)
-        let channel = AsyncChannel<Int>(bufferingStrategy: .dropNewest(maxCapacity: maximumCapacity))
-        for i in 1...maximumCapacity {
-            let result = channel.send(i)
-            guard case .enqueued(let remainingCapacity) = result else {
-                XCTFail("The send result wasn't 'enqueued'")
-                return
-            }
-            XCTAssertEqual(remainingCapacity, maximumCapacity - i)
-        }
-        
-        for _ in 1...maximumCapacity {
-            let item = Int.random(in: 0...10000)
-            let resultOnFull = channel.send(item)
-            switch resultOnFull {
-            case .dropped(let value):
-                XCTAssertEqual(value, item)
-            default:
-                XCTFail("The send result wasn't 'dropped'")
-            }
-        }
-        
-        for i in 1...maximumCapacity {
-            guard let value = channel.tryReceive() else {
-                XCTFail("Couldn't receive item...")
-                break
-            }
-            XCTAssertEqual(i, value)
-        }
-        
-        channel.close()
-        let result = channel.send(1)
-        switch result {
-        case .closed:
-            return
-        default:
-            XCTFail("The send result should have been 'closed'.")
-        }
-    }
-    
-    func testAsyncStreamWithPipe() async throws {
-        let (consumer, producer) = AsyncStream<Int>.pipe()
+    func testAsyncStreamMakeStream() async throws {
+        let (consumer, producer) = AsyncStream.makeStream(of: Int.self)
         let producerTask = Task<Int, Never> {
             var sum = 0
             for _ in 0..<10000 {

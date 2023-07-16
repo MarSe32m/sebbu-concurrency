@@ -83,7 +83,7 @@ final class SebbuConcurrencyExecutorTests: XCTestCase {
         }
     }
     
-    func testSingleThreadedExecutor() {
+    func testSingleThreadedGlobalExecutor() {
         SingleThreadedGlobalExecutor.shared.setup()
         defer { SingleThreadedGlobalExecutor.shared.reset() }
         executorTests()
@@ -96,5 +96,29 @@ final class SebbuConcurrencyExecutorTests: XCTestCase {
         defer { MultiThreadedGlobalExecutor.shared.reset() }
         executorTests()
         MultiThreadedGlobalExecutor.shared.run()
+    }
+    
+    func testBasicSerialExecutor() async {
+        actor ExecutorActor {
+            static let basicSerialExecutor = BasicSerialExecutor.withDetachedThread()
+            nonisolated var unownedExecutor: UnownedSerialExecutor {
+                ExecutorActor.basicSerialExecutor.asUnownedSerialExecutor()
+            }
+            
+            var state: Int = 0
+            
+            func increment() {
+                state += 1
+            }
+            
+        }
+        let exec1 = ExecutorActor()
+        let exec2 = ExecutorActor()
+        await exec1.increment()
+        await exec2.increment()
+        let exec1State = await exec1.state
+        let exec2State = await exec2.state
+        XCTAssertEqual(exec1State, 1)
+        XCTAssertEqual(exec2State, 1)
     }
 }

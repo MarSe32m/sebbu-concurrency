@@ -15,22 +15,12 @@ public struct AsyncChannel<Element>: @unchecked Sendable {
         /// Add the items to the buffer at no limit.
         case unbounded
         
-        /// When the buffer is full, the oldest item will be removed to make room for the new one
-        case dropOldest(maxCapacity: Int)
-        
-        /// When the buffer is full, the newest item (the item that is just being sent) will be dropped to preserve the buffer size
-        case dropNewest(maxCapacity: Int)
+        /// Bounded
+        case bounded(capacity: Int)
     }
     
-    public enum SendResult {
-        /// The channel successfully enqueued the item. The remainingCapacity is an indication of how much room there is left.
-        /// It might happen that there are many tasks enqueueing items so the capacity might be lower.
-        case enqueued(remainingCapacity: Int)
-        
-        /// The stream didn't enqueue the item because the underlying buffer was full.
-        case dropped(Element)
-        
-        /// The item wasn't enqueued because the channel was closed
+    public enum SendError: Error {
+        /// The channel has been closed
         case closed
     }
     
@@ -52,16 +42,26 @@ public struct AsyncChannel<Element>: @unchecked Sendable {
         _storage.consumerCount
     }
     
+    /// The amound of producer tasks that are waiting to send items.
+    public var producerCount: Int {
+        _storage.producerCount
+    }
+    
     public init(bufferingStrategy: BufferingStrategy = .unbounded) {
         _storage = _AsyncChannelStorage(bufferingStrategy: bufferingStrategy)
     }
     
-    /// Send an item to the channel. Depending on the buffering strategy and the amount of items in the buffer,
+    /// Try to send an item to the channel. Depending on the buffering strategy and the amount of items in the buffer,
     /// the element might or might not be enqueued.
     @inlinable
     @discardableResult
-    public func send(_ value: Element) -> SendResult {
-        _storage.send(value)
+    public func trySend(_ value: Element) -> Bool {
+        _storage.trySend(value)
+    }
+    
+    @inlinable
+    public func send(_ value: Element) async throws {
+        try await _storage.send(value)
     }
     
     /// Try to receive an item. If the buffer is empty then `nil` will be returned.
@@ -112,6 +112,9 @@ extension AsyncChannel {
 
         @usableFromInline
         internal var _consumers = Deque<(id: UInt64, continuation: UnsafeContinuation<Element?, Never>)>()
+        
+        @usableFromInline
+        internal var _producers = Deque<(id: UInt64, continuation: UnsafeContinuation<Void, Error>, value: Element)>()
 
         @usableFromInline
         internal var _currentId: UInt64 = 0
@@ -139,80 +142,118 @@ extension AsyncChannel {
             }
         }
 
+        public var producerCount: Int {
+            _lock.withLock {
+                _producers.count
+            }
+        }
+        
         public init(bufferingStrategy: BufferingStrategy = .unbounded) {
             self.bufferingStrategy = bufferingStrategy
-            if case .dropOldest(let maxCapacity) = bufferingStrategy {
-                _buffer.reserveCapacity(maxCapacity)
-            } else if case .dropNewest(let maxCapacity) = bufferingStrategy {
+            if case .bounded(let maxCapacity) = bufferingStrategy {
                 _buffer.reserveCapacity(maxCapacity)
             }
         }
 
         @inlinable
         @discardableResult
-        public final func send(_ value: Element) -> SendResult {
+        public final func trySend(_ value: Element) -> Bool {
             _lock.lock()
             if _isClosed {
                 _lock.unlock()
-                return SendResult.closed
+                return false
             }
-            var result: SendResult
             if let consumer = _consumers.popFirst() {
-                switch bufferingStrategy {
-                case .unbounded:
-                    _lock.unlock()
-                    result = .enqueued(remainingCapacity: .max)
-                case .dropOldest(let maxCapacity):
-                    _lock.unlock()
-                    result = .enqueued(remainingCapacity: maxCapacity)
-                case .dropNewest(let maxCapacity):
-                    _lock.unlock()
-                    result = .enqueued(remainingCapacity: maxCapacity)
-                }
+                _lock.unlock()
                 consumer.continuation.resume(returning: value)
-                return result
-            } else {
-                switch bufferingStrategy {
-                case .unbounded:
+                return true
+            }
+            defer { _lock.unlock() }
+            switch bufferingStrategy {
+            case .unbounded:
+                _buffer.append(value)
+                return true
+            case .bounded(let maxCapacity):
+                let count = _buffer.count
+                if count < maxCapacity {
                     _buffer.append(value)
-                    _lock.unlock()
-                    return .enqueued(remainingCapacity: .max)
-                case .dropOldest(let maxCapacity):
-                    let count = _buffer.count
-                    if count < maxCapacity {
-                        _buffer.append(value)
-                        _lock.unlock()
-                        return .enqueued(remainingCapacity: maxCapacity - count - 1)
-                    } else {
-                        let removedItem = _buffer.removeFirst()
-                        _buffer.append(value)
-                        _lock.unlock()
-                        return .dropped(removedItem)
-                    }
-                case .dropNewest(let maxCapacity):
-                    let count = _buffer.count
-                    if count < maxCapacity {
-                        _buffer.append(value)
-                        _lock.unlock()
-                        return .enqueued(remainingCapacity: maxCapacity - count - 1)
-                    } else {
-                        _lock.unlock()
-                        return .dropped(value)
-                    }
                 }
+                return count < maxCapacity
             }
         }
 
         @inlinable
+        public final func send(_ value: Element) async throws {
+            _lock.lock()
+            if _isClosed {
+                _lock.unlock()
+                throw SendError.closed
+            }
+            if let consumer = _consumers.popFirst() {
+                _lock.unlock()
+                consumer.continuation.resume(returning: value)
+                return
+            }
+            switch bufferingStrategy {
+            case .unbounded:
+                _buffer.append(value)
+                _lock.unlock()
+                return
+            case .bounded(let maxCapacity):
+                let count = _buffer.count
+                if count < maxCapacity {
+                    _buffer.append(value)
+                    _lock.unlock()
+                    return
+                }
+                let id = _currentId + 1
+                _currentId += 1
+                
+                try await withTaskCancellationHandler(operation: {
+                    try await withUnsafeThrowingContinuation({ (continuation: UnsafeContinuation<Void, Error>) in
+                        _producers.append((id: id, continuation: continuation, value: value))
+                        _lock.unlock()
+                    })
+                }, onCancel: {
+                    // This way we ensure that the operation above is perfomed before the cancel block.
+                    // But this happens only on cancellation (which should be rare/not happen 1000 times per second)
+                    // so I think this is a fine approach for now.
+                    Task {
+                        _lock.withLock {
+                            _producers.removeAll { (identifier, continuation, _) in
+                                if id == identifier {
+                                    continuation.resume(throwing: CancellationError())
+                                    return true
+                                }
+                                return false
+                            }
+                        }
+                    }
+                })
+            }
+        }
+        
+        @inlinable
         public final func tryReceive() -> Element? {
             _lock.withLock {
-                _buffer.popFirst()
+                if let value = _buffer.popFirst() {
+                    if let (_, continuation, producerValue) = _producers.popFirst() {
+                        _buffer.append(producerValue)
+                        continuation.resume()
+                    }
+                    return value
+                }
+                return nil
             }
         }
 
         public final func receive() async -> Element? {
             _lock.lock()
             if let value = _buffer.popFirst() {
+                if let (_, continuation, producerValue) = _producers.popFirst() {
+                    _buffer.append(producerValue)
+                    continuation.resume()
+                }
                 _lock.unlock()
                 return value
             }
@@ -231,7 +272,7 @@ extension AsyncChannel {
                     _lock.unlock()
                 }
             } onCancel: {
-                // This way we ensure that the operation is perfomed before the cancel block.
+                // This way we ensure that the operation above is perfomed before the cancel block.
                 // But this happens only on cancellation (which should be rare/not happen 1000 times per second)
                 // so I think this is a fine approach for now.
                 Task {
@@ -252,8 +293,11 @@ extension AsyncChannel {
         public final func close() {
             _lock.withLock {
                 _isClosed = true
-                while let continuation = _consumers.popFirst()?.continuation {
+                while let (_, continuation) = _consumers.popFirst() {
                     continuation.resume(returning: nil)
+                }
+                while let (_, continuation, _) = _producers.popFirst() {
+                    continuation.resume(throwing: SendError.closed)
                 }
             }
         }

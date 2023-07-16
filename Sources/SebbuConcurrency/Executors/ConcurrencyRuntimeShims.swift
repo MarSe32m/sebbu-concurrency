@@ -14,3 +14,7 @@ public func _getCurrentExecutor() -> UnownedSerialExecutor
 @_silgen_name("swift_task_enqueueMainExecutor")
 @inlinable
 public func _enqueueMainExecutor(_ job: UnownedJob) -> Void
+
+@_silgen_name("swift_task_enqueueGlobal")
+@inlinable
+public func _enqueueGlobal(_ job: UnownedJob) -> Void

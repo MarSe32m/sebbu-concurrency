@@ -4,65 +4,54 @@
 //
 //  Created by Sebastian Toivonen on 23.1.2022.
 //
-#if canImport(Atomics)
-import Atomics
+
+import SebbuTSDS
 
 public class RateLimiter: @unchecked Sendable {
-    
-    internal struct Waiter {
-        var permits: Int
-        let continuation: UnsafeContinuation<Void, Never>
-        
-        init(permits: Int, continuation: UnsafeContinuation<Void,Never>) {
-            self.permits = permits
-            self.continuation = continuation
-        }
-    }
-    
     public struct PermitsExhaustedError: Error {
         public let permitsOverLimit: Int
     }
     
-    public let permitsPerSecond: Double
     public let maxPermits: Int
     
-    private let timeInterval: Double
-    private var permits: ManagedAtomic<Int>
+    private let permitsPerInterval: Int
+    private let timeInterval: Duration
+    private var lastPermitRefill: ContinuousClock.Instant = .now
+    private var permits: Int
     
+    private let lock = Lock()
     
-    private let timer: RepeatingTimer
-    
-    public init(permits: Int, per interval: Double, maxPermits: Int) {
-        self.timeInterval = interval
-        self.permits = .init(permits)
-        self.permitsPerSecond = Double(permits) / interval
+    public init(permits: Int, perInterval: Duration, maxPermits: Int) {
+        self.timeInterval = perInterval
+        self.permits = permits
         self.maxPermits = maxPermits
-        
-        let delta = max(0.01, interval / Double(permits))
-        let permitsPerEvent = max(Int(permitsPerSecond * delta), 1)
-        self.timer = RepeatingTimer(delta: delta)
-        timer.eventHandler = { [weak self] in
-            guard let self = self else { return }
-            let currentPermits = self.permits.wrappingIncrementThenLoad(by: permitsPerEvent, ordering: .relaxed)
-            self.permits.wrappingDecrement(by: max(0, currentPermits - maxPermits), ordering: .relaxed)
-        }
-        timer.resume()
+        self.permitsPerInterval = permits
     }
     
     public func acquire() throws {
-        try acquire(permits: 1)
+        try lock.withLock { try _acquire(permits: 1) }
     }
     
-    public func acquire(permits _permits: Int) throws {
-        let currentPermits = permits.wrappingDecrementThenLoad(by: _permits, ordering: .relaxed)
-        if currentPermits > 0 { return }
-        permits.wrappingIncrement(by: _permits, ordering: .relaxed)
-        throw PermitsExhaustedError(permitsOverLimit: -currentPermits)
+    public func acquire(permits: Int) throws {
+        try lock.withLock { try _acquire(permits: permits) }
     }
     
-    deinit {
-        timer.suspend()
-        timer.eventHandler = nil
+    @inline(__always)
+    internal func _acquire(permits _permits: Int) throws {
+        self.permits -= _permits
+        if self.permits >= 0 { return }
+        _refill()
+        if self.permits <= 0 {
+            self.permits += _permits
+            throw PermitsExhaustedError(permitsOverLimit: _permits - permits)
+        }
+    }
+    
+    @inline(__always)
+    internal func _refill() {
+        let timeSinceLastRefill = .now - lastPermitRefill
+        let newPermits = Int(Double(permitsPerInterval) * (timeSinceLastRefill / timeInterval))
+        if newPermits > 0 { lastPermitRefill = .now }
+        permits = min(permits + newPermits, maxPermits)
     }
 }
-#endif

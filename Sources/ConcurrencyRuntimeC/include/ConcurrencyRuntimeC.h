@@ -225,11 +225,14 @@ SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void (* _Nullable swift_task_enqueueMainExecutor_hook)(
     JobRef _Nonnull job, swift_task_enqueueMainExecutor_original _Nonnull original);
 
-//TODO: Find out whats the correct signature for this... _silgen_name() way isn't very appealing tbh
-/// Establish that the current thread is running as the given
-/// executor, then run a job.
-//SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
-//void swift_job_run(JobRef _Nonnull job, ExecutorRef executor);
+/// A hook to take over the main queue draining
+typedef SWIFT_CC(swift) void (*swift_task_asyncMainDrainQueue_original)();
+typedef SWIFT_CC(swift) void (*swift_task_asyncMainDrainQueue_override)(
+ swift_task_asyncMainDrainQueue_original _Nonnull original);
+SWIFT_EXPORT_FROM(swift_Concurrency)
+SWIFT_CC(swift) void (* _Nullable swift_task_asyncMainDrainQueue_hook)(
+ swift_task_asyncMainDrainQueue_original _Nonnull original,
+ swift_task_asyncMainDrainQueue_override _Nonnull compatOverride);
 
 /// Return the current thread's active executor reference.
 //SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)

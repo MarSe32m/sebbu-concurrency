@@ -18,6 +18,7 @@ public final actor MainActor: GlobalActor, SerialExecutor {
 
     @inlinable
     public nonisolated func enqueue(_ job: UnownedJob) {
+        // This way we actually call the hook if it is set
         _enqueueMainExecutor(job)
     }
 

@@ -51,6 +51,12 @@ internal final class Queue {
     }
 }
 
+// New logic:
+// Once a worker has gotten work, the decrement the workerIndex, this way
+// if only single items of work is enqueued one after the other, the same thread
+// will run them. This way we eliminate unnecessary thread switching in cases
+// when one thread is enough to do the work
+
 /// A multi threaded cooperative global executor implementation for Swift Concurrency.
 /// Spawns cores - 1 threads. If the systems has only one core, then one thread will be spawned.
 ///
@@ -68,6 +74,8 @@ internal final class Queue {
 /// So there are two things to remember. You need to call `MultiThreadedGlobalExecutor.shared.setup()`
 /// and then you need to drain the queue of work either as shown above or by using repeatedly the `runOnce()` method
 /// to only process one job in the main queue at a time.
+///
+/// Note: Currently this implementation has very bad integrability with TaskGroups.
 public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     @usableFromInline
     internal let queues: [Queue]
@@ -103,9 +111,6 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     internal let nextTimedWorkDeadline: UnsafeAtomic<UInt64> = .create(0)
     
     @usableFromInline
-    internal let semaphore = DispatchSemaphore(value: 0)
-    
-    @usableFromInline
     internal let mainSemaphore = DispatchSemaphore(value: 0)
     
     @usableFromInline
@@ -121,7 +126,6 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
         nextTimedWorkDeadline.destroy()
         started.destroy()
     }
-    
     
     internal init() {
         let coreCount = ProcessInfo.processInfo.activeProcessorCount - 1 > 0 ? ProcessInfo.processInfo.activeProcessorCount - 1 : 1
@@ -155,7 +159,12 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
                 MultiThreadedGlobalExecutor.shared.enqueue(job, deadline: deadline.magnitude)
             }
         }
+        
         start()
+        
+        //swift_task_asyncMainDrainQueue_hook = { _, _ in
+        //    MultiThreadedGlobalExecutor.shared.run()
+        //}
     }
     
     /// Reset the Swift Concurrency runtime hooks
@@ -164,6 +173,7 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
         swift_task_enqueueMainExecutor_hook = nil
         swift_task_enqueueGlobalWithDelay_hook = nil
         swift_task_enqueueGlobalWithDeadline_hook = nil
+        //swift_task_asyncMainDrainQueue_hook = nil
         stop()
     }
     
@@ -185,7 +195,6 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
         while started.load(ordering: .relaxed) {
             if let job = mainQueue.dequeue() {
                 job._runSynchronously(on: _getCurrentExecutor())
-                //_swiftJobRun(job, _getCurrentExecutor())
             }
             mainSemaphore.wait()
         }
@@ -200,7 +209,6 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     public func runOnce() -> Bool {
         if let job = mainQueue.dequeue() {
             job._runSynchronously(on: _getCurrentExecutor())
-            //_swiftJobRun(job, _getCurrentExecutor())
             return true
         }
         return false
@@ -210,11 +218,12 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     public func enqueue(_ job: UnownedJob) {
         precondition(started.load(ordering: .relaxed), "The ThreadPool wasn't started before blocks were submitted")
         assert(!workers.isEmpty)
-        let index = getNextIndex()
+        let index = getQueueIndex()
         let queue = queues[index % numberOfQueues]
         queue.enqueue(job)
         workCount.wrappingIncrement(ordering: .acquiringAndReleasing)
-        semaphore.signal()
+        workers[index % workers.count].semaphore.signal()
+        //semaphore.signal()
     }
     
     @inline(__always)
@@ -233,7 +242,8 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     internal func enqueue(_ job: UnownedJob, deadline: UInt64) {
         let timedJob = TimedUnownedJob(job: job, deadline: deadline)
         timedWorkQueue.enqueue(timedJob)
-        semaphore.signal()
+        let index = getQueueIndex()
+        workers[index % workers.count].semaphore.signal()
     }
 
     @inlinable
@@ -298,6 +308,9 @@ final class Worker: @unchecked Sendable, SerialExecutor {
     @usableFromInline
     let numberOfQueues: Int
     
+    @usableFromInline
+    let semaphore: DispatchSemaphore = DispatchSemaphore(value: 0)
+    
     init(executor: MultiThreadedGlobalExecutor) {
         self.executor = executor
         self.numberOfQueues = executor.queues.count
@@ -312,9 +325,9 @@ final class Worker: @unchecked Sendable, SerialExecutor {
             // By exchanging only one thread will sleep
             let deadline = executor.nextTimedWorkDeadline.exchange(0, ordering: .relaxed)
             if _slowPath(deadline > 0) {
-                _ = executor.semaphore.wait(timeout: .init(uptimeNanoseconds: deadline))
+                _ = semaphore.wait(timeout: .init(uptimeNanoseconds: deadline))
             } else {
-                executor.semaphore.wait()
+                semaphore.wait()
             }
         }
         // Drain the queues one last time
@@ -331,7 +344,6 @@ final class Worker: @unchecked Sendable, SerialExecutor {
                 while let job = queue.dequeue() {
                     executor.workCount.wrappingDecrement(ordering: .relaxed)
                     job._runSynchronously(on: asUnownedSerialExecutor())
-                    //_swiftJobRun(job, _getCurrentExecutor())
                     executor.handleTimedWork()
                 }
             }
@@ -350,7 +362,7 @@ final class Worker: @unchecked Sendable, SerialExecutor {
     
     public func stop() {
         running.store(false, ordering: .relaxed)
-        executor.semaphore.signal()
+        semaphore.signal()
     }
     
     deinit {
@@ -467,7 +479,6 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
             if !started { break }
             if let job = mainQueue.dequeue() {
                 job._runSynchronously(on: _getCurrentExecutor())
-                //_swiftJobRun(job, _getCurrentExecutor())
             }
             mainSemaphore.wait()
         }
@@ -482,7 +493,6 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     public func runOnce() -> Bool {
         if let job = mainQueue.dequeue() {
             job._runSynchronously(on: _getCurrentExecutor())
-            //_swiftJobRun(job, _getCurrentExecutor())
             return true
         }
         return false

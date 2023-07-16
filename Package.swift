@@ -1,5 +1,4 @@
 // swift-tools-version:5.5
-
 import PackageDescription
 
 let package = Package(
@@ -22,7 +21,8 @@ let package = Package(
             dependencies: [.product(name: "SebbuTSDS", package: "sebbu-ts-ds"),
                            .product(name: "DequeModule", package: "swift-collections"),
                            .product(name: "Atomics", package: "swift-atomics", condition: .when(platforms: [.macOS, .iOS, .tvOS, .watchOS, .linux])),
-                           .target(name: "ConcurrencyRuntimeC")]),
+                           .target(name: "ConcurrencyRuntimeC")],
+            swiftSettings: [.unsafeFlags(["-Xfrontend", "-disable-availability-checking"])]),
         .executableTarget(name: "DevelopmentTesting",
                           dependencies: [
                             .target(name: "SebbuConcurrency")

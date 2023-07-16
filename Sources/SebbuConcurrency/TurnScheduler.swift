@@ -35,10 +35,12 @@ public final class TurnScheduler: @unchecked Sendable {
         await withUnsafeContinuation { queue.enqueue($0) }
     }
     
+    @inlinable
+    public func waitUnlessCancelled() async throws {
+        fatalError("NOT IMPLEMENTED")
+    }
+    
     deinit {
-        queue.dequeueAll { continuation in
-            continuation.resume()
-        }
         timer.suspend()
     }
 }
