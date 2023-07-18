@@ -1,4 +1,4 @@
-// swift-tools-version:5.5
+// swift-tools-version:5.6
 import PackageDescription
 
 let package = Package(
@@ -12,7 +12,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/MarSe32m/sebbu-ts-ds.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-collections.git", branch: "main"),
-        .package(url: "https://github.com/apple/swift-atomics.git", branch: "main")
+        .package(url: "https://github.com/apple/swift-atomics.git", from: "1.1.0")
     ],
     targets: [
         .target(name: "ConcurrencyRuntimeC"),
