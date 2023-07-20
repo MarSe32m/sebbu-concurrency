@@ -1,6 +1,6 @@
 //
-//  AsyncChannel.swift
-//  
+//  AsyncThrowingChannel.swift
+//
 //
 //  Created by Sebastian Toivonen on 2.1.2022.
 //
@@ -10,17 +10,22 @@ import DequeModule
 
 /// Channel is an object that can be used to communicate between tasks. Unlike AsyncStream,
 /// multiple tasks can send and receive items from the Channel.
-public struct AsyncChannel<Element>: @unchecked Sendable {
+public struct AsyncThrowingChannel<Element>: @unchecked Sendable {
     public enum BufferingStrategy {
         /// Add the items to the buffer at no limit.
         case unbounded
         
         /// Bounded
-        case bounded(capacity: Int)
+        case bounded(_ capacity: Int)
+    }
+    
+    public enum SendError: Error {
+        /// The channel has been closed
+        case closed
     }
     
     @usableFromInline
-    internal let _storage: _AsyncChannelStorage
+    internal let _storage: _AsyncThrowingChannelStorage
     
     /// Indicates wheter the channel has been closed.
     public var isClosed: Bool {
@@ -43,7 +48,7 @@ public struct AsyncChannel<Element>: @unchecked Sendable {
     }
     
     public init(bufferingStrategy: BufferingStrategy = .unbounded) {
-        _storage = _AsyncChannelStorage(bufferingStrategy: bufferingStrategy)
+        _storage = _AsyncThrowingChannelStorage(bufferingStrategy: bufferingStrategy)
     }
     
     /// Try to send an item to the channel. Depending on the buffering strategy and the amount of items in the buffer,
@@ -55,8 +60,8 @@ public struct AsyncChannel<Element>: @unchecked Sendable {
     }
     
     @inlinable
-    public func send(_ value: Element) async {
-        await _storage.send(value)
+    public func send(_ value: Element) async throws {
+        try await _storage.send(value)
     }
     
     /// Try to receive an item. If the buffer is empty then `nil` will be returned.
@@ -82,9 +87,9 @@ public struct AsyncChannel<Element>: @unchecked Sendable {
     }
 }
 
-extension AsyncChannel: AsyncSequence {
+extension AsyncThrowingChannel: AsyncSequence {
     public struct Iterator: Sendable, AsyncIteratorProtocol {
-        let _channelStorage: _AsyncChannelStorage
+        let _channelStorage: _AsyncThrowingChannelStorage
         
         mutating public func next() async -> Element? {
             await _channelStorage.receive()
@@ -96,9 +101,9 @@ extension AsyncChannel: AsyncSequence {
     }
 }
 
-extension AsyncChannel {
+extension AsyncThrowingChannel {
     @usableFromInline
-    internal final class _AsyncChannelStorage: @unchecked Sendable {
+    internal final class _AsyncThrowingChannelStorage: @unchecked Sendable {
         @usableFromInline
         internal let _lock = Lock()
 
@@ -109,7 +114,7 @@ extension AsyncChannel {
         internal var _consumers = Deque<(id: UInt64, continuation: UnsafeContinuation<Element?, Never>)>()
         
         @usableFromInline
-        internal var _producers = Deque<(id: UInt64, continuation: UnsafeContinuation<Void, Never>, value: Element)>()
+        internal var _producers = Deque<(id: UInt64, continuation: UnsafeContinuation<Void, Error>, value: Element)>()
 
         @usableFromInline
         internal var _currentId: UInt64 = 0
@@ -178,11 +183,11 @@ extension AsyncChannel {
         }
 
         @inlinable
-        public final func send(_ value: Element) async {
+        public final func send(_ value: Element) async throws {
             _lock.lock()
             if _isClosed {
                 _lock.unlock()
-                return
+                throw SendError.closed
             }
             if let consumer = _consumers.popFirst() {
                 _lock.unlock()
@@ -204,11 +209,11 @@ extension AsyncChannel {
                 let id = _currentId + 1
                 _currentId += 1
                 
-                await withTaskCancellationHandler(operation: {
-                    await withUnsafeContinuation {
-                        _producers.append((id: id, continuation: $0, value: value))
+                try await withTaskCancellationHandler(operation: {
+                    try await withUnsafeThrowingContinuation({ (continuation: UnsafeContinuation<Void, Error>) in
+                        _producers.append((id: id, continuation: continuation, value: value))
                         _lock.unlock()
-                    }
+                    })
                 }, onCancel: {
                     // This way we ensure that the operation above is perfomed before the cancel block.
                     // But this happens only on cancellation (which should be rare/not happen 1000 times per second)
@@ -217,7 +222,7 @@ extension AsyncChannel {
                         _lock.withLock {
                             _producers.removeAll { (identifier, continuation, _) in
                                 if id == identifier {
-                                    continuation.resume()
+                                    continuation.resume(throwing: CancellationError())
                                     return true
                                 }
                                 return false
@@ -292,7 +297,7 @@ extension AsyncChannel {
                     continuation.resume(returning: nil)
                 }
                 while let (_, continuation, _) = _producers.popFirst() {
-                    continuation.resume()
+                    continuation.resume(throwing: SendError.closed)
                 }
             }
         }

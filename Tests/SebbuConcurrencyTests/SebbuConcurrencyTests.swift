@@ -6,7 +6,6 @@ import SebbuTSDS
 final class SebbuConcurrencyTests: XCTestCase {
     @available(macOS 13.0, *)
     func testRateLimiter() async throws {
-        #if canImport(Atomics)
         let rateLimiter = RateLimiter(permits: 5000, perInterval: .seconds(1), maxPermits: 30000)
         let start = Date()
         var remainingCount = 30000
@@ -23,7 +22,6 @@ final class SebbuConcurrencyTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(start.distance(to: end), 5)
         try await Task.sleep(for: .seconds(1.1))
         XCTAssertNoThrow(try rateLimiter.acquire(permits: 5000))
-        #endif
     }
     
     func testRepeatingTimer() {
@@ -62,6 +60,26 @@ final class SebbuConcurrencyTests: XCTestCase {
             return await channel.reduce(0, +)
         }
         for _ in 0..<writeCount {
+            await channel.send(1)
+        }
+        channel.close()
+        let readValue = await reader.value
+        XCTAssertEqual(writeCount, readValue)
+    }
+    
+    func testThrowingChannelOneWriter() async throws {
+        let channel = AsyncThrowingChannel<Int>()
+        //FIXME: For some reason Windows crashes with more than 100 written items...
+        #if !os(Windows)
+        let writeCount = 100000
+        #else
+        throw XCTSkip("Windows has some problems with Concurrency stuff...")
+        let writeCount = 100
+        #endif
+        let reader = Task.detached {
+            return await channel.reduce(0, +)
+        }
+        for _ in 0..<writeCount {
             try await channel.send(1)
         }
         channel.close()
@@ -89,6 +107,45 @@ final class SebbuConcurrencyTests: XCTestCase {
                 let writers = (0..<writerCount).map {_ in
                     Task<Void, Error> {
                         for _ in 0..<writeCount {
+                            await channel.send(1)
+                        }
+                    }
+                }
+                for writer in writers {
+                    let _ = try await writer.value
+                }
+                channel.close()
+                var totalSum = 0
+                for reader in readers {
+                    totalSum += await reader.value
+                }
+                XCTAssertEqual(writerCount * writeCount, totalSum)
+                XCTAssertNil(channel.tryReceive())
+            }
+        }
+        
+    }
+    
+    func testThrowingChannelMultipleWritersMultipleReaders() async throws {
+        //FIXME: For some reason Windows crashes with more than 100 written items per writer...
+        #if os(Windows)
+        let writeCount = 10000
+        #else
+        //throw XCTSkip("Windows has some problems with Concurrency stuff...")
+        let writeCount = 10000
+        #endif
+        
+        for writerCount in 1...10 {
+            for readerCount in 1...10 {
+                let channel = AsyncThrowingChannel<Int>()
+                let readers = (0..<readerCount).map {_ in
+                    Task<Int, Never> {
+                        return await channel.reduce(0, +)
+                    }
+                }
+                let writers = (0..<writerCount).map {_ in
+                    Task<Void, Error> {
+                        for _ in 0..<writeCount {
                             try await channel.send(1)
                         }
                     }
@@ -108,8 +165,8 @@ final class SebbuConcurrencyTests: XCTestCase {
         
     }
     
-    func testUnboundedBufferingStrategy() async throws {
-        let channel = AsyncChannel<Int>(bufferingStrategy: .unbounded)
+    func testThrowingChannelUnboundedBufferingStrategy() async throws {
+        let channel = AsyncThrowingChannel<Int>(bufferingStrategy: .unbounded)
         for _ in 0..<1_00 {
             try await channel.send(1)
         }
@@ -117,13 +174,13 @@ final class SebbuConcurrencyTests: XCTestCase {
         do {
             try await channel.send(1)
         } catch {
-            XCTAssertTrue(error is AsyncChannel<Int>.SendError)
+            XCTAssertTrue(error is AsyncThrowingChannel<Int>.SendError)
         }
         XCTAssertFalse(channel.trySend(1))
     }
     
-    func testBoundedBufferingStrategy() async throws {
-        let channel = AsyncChannel<Int>(bufferingStrategy: .bounded(capacity: 50))
+    func testThrowingChannelBoundedBufferingStrategy() async throws {
+        let channel = AsyncThrowingChannel<Int>(bufferingStrategy: .bounded(50))
         for _ in 0..<50 {
             XCTAssertTrue(channel.trySend(1))
         }
@@ -134,7 +191,7 @@ final class SebbuConcurrencyTests: XCTestCase {
         do {
             try await channel.send(1)
         } catch {
-            XCTAssertTrue(error is AsyncChannel<Int>.SendError)
+            XCTAssertTrue(error is AsyncThrowingChannel<Int>.SendError)
         }
         XCTAssertFalse(channel.trySend(1))
     }
