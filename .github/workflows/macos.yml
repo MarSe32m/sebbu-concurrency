@@ -9,8 +9,7 @@ on:
 
 jobs:
   macOS-swift-latest:
-    runs-on: macos-12
-    #runs-on: macos-latest
+    runs-on: macos-latest
     
     name: macOS Swift Latest
     
@@ -28,7 +27,7 @@ jobs:
       run: swift build -c release
       
     - name: Test (Debug)
-      run: swift test --configuration debug --parallel
+      run: swift test -c debug
       
     - name: Test (Release)
-      run: swift test --configuration release -Xswiftc -enable-testing --parallel
+      run: swift test -c release
