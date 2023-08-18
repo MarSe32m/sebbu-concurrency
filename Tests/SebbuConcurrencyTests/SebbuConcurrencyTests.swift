@@ -49,13 +49,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     
     func testChannelOneWriter() async throws {
         let channel = AsyncChannel<Int>()
-        //FIXME: For some reason Windows crashes with more than 100 written items...
-        #if !os(Windows)
         let writeCount = 100000
-        #else
-        throw XCTSkip("Windows has some problems with Concurrency stuff...")
-        let writeCount = 100
-        #endif
         let reader = Task.detached {
             return await channel.reduce(0, +)
         }
@@ -69,13 +63,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     
     func testThrowingChannelOneWriter() async throws {
         let channel = AsyncThrowingChannel<Int>()
-        //FIXME: For some reason Windows crashes with more than 100 written items...
-        #if !os(Windows)
         let writeCount = 100000
-        #else
-        throw XCTSkip("Windows has some problems with Concurrency stuff...")
-        let writeCount = 100
-        #endif
         let reader = Task.detached {
             return await channel.reduce(0, +)
         }
@@ -88,14 +76,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testChannelMultipleWritersMultipleReaders() async throws {
-        //FIXME: For some reason Windows crashes with more than 100 written items per writer...
-        #if os(Windows)
         let writeCount = 10000
-        #else
-        //throw XCTSkip("Windows has some problems with Concurrency stuff...")
-        let writeCount = 10000
-        #endif
-        
         for writerCount in 1...10 {
             for readerCount in 1...10 {
                 let channel = AsyncChannel<Int>()
@@ -127,14 +108,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testThrowingChannelMultipleWritersMultipleReaders() async throws {
-        //FIXME: For some reason Windows crashes with more than 100 written items per writer...
-        #if os(Windows)
         let writeCount = 10000
-        #else
-        //throw XCTSkip("Windows has some problems with Concurrency stuff...")
-        let writeCount = 10000
-        #endif
-        
         for writerCount in 1...10 {
             for readerCount in 1...10 {
                 let channel = AsyncThrowingChannel<Int>()
