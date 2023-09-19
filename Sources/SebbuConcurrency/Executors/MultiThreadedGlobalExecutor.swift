@@ -215,7 +215,8 @@ public final class MultiThreadedGlobalExecutor: @unchecked Sendable, Executor {
     }
     
     @inlinable
-    public func enqueue(_ job: UnownedJob) {
+    public func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
         precondition(started.load(ordering: .relaxed), "The ThreadPool wasn't started before blocks were submitted")
         assert(!workers.isEmpty)
         let index = getQueueIndex()
@@ -351,7 +352,7 @@ final class Worker: @unchecked Sendable, SerialExecutor {
     }
     
     @inlinable
-    public func enqueue(_ job: UnownedJob) {
+    public func enqueue(_ job: consuming ExecutorJob) {
         executor.enqueue(job)
     }
     

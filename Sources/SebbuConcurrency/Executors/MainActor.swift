@@ -17,7 +17,8 @@ public final actor MainActor: GlobalActor, SerialExecutor {
     }
 
     @inlinable
-    public nonisolated func enqueue(_ job: UnownedJob) {
+    public nonisolated func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
         // This way we actually call the hook if it is set
         _enqueueMainExecutor(job)
     }

@@ -1,9 +1,9 @@
-// swift-tools-version:5.6
+// swift-tools-version:5.9
 import PackageDescription
 
 let package = Package(
     name: "sebbu-concurrency",
-    platforms: [.macOS(.v12), .iOS(.v15)],
+    platforms: [.macOS("14.0"), .iOS("17.0")],
     products: [
         .library(
             name: "SebbuConcurrency",

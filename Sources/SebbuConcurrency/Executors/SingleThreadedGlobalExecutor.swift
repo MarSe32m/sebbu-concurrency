@@ -116,7 +116,8 @@ public final class SingleThreadedGlobalExecutor: @unchecked Sendable, SerialExec
     }
     
     @inline(__always)
-    public func enqueue(_ job: UnownedJob) {
+    public func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
         work.append(job)
     }
     

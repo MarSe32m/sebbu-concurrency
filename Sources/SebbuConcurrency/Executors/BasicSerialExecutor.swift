@@ -176,10 +176,8 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
     
     @inlinable
     @inline(__always)
-    public func enqueue(_ job: UnownedJob) {
-        #if swift(>=5.9)
-        #warning("TODO: Implement enqueue(_ job: ExecutorJob and remove if swift() cechk from top of the file")
-        #endif
+    public func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
         //TODO: Once the custom executor proposal lands, we have to take into account the priority of the job
         // We might have 3 or 4 different queues for different priorities. Then we run them by for example
         // running 61 high priority, 2 mid priority, 3 high priority, 1 low priority, etc.
