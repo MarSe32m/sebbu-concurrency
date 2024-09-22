@@ -43,9 +43,9 @@ internal struct DelayedJob: Comparable {
     let executorJob: UnownedJob
 
     @usableFromInline
-    let deadline: ContinuousClock.Instant
+    let deadline: UInt64
 
-    init(job: consuming ExecutorJob, deadline: ContinuousClock.Instant) {
+    init(job: consuming ExecutorJob, deadline: UInt64) {
         self.executorJob = UnownedJob(job)
         self.deadline = deadline
     }

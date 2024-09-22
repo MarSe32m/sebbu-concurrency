@@ -49,19 +49,34 @@ public final class SingleThreadedGlobalExecutor: @unchecked Sendable, SerialExec
             let job = ExecutorJob(unsafeBitCast(job, to: UnownedJob.self))
             SingleThreadedGlobalExecutor.shared.enqueue(job, delay: delay)
         }
-        
+
         swift_task_enqueueGlobalWithDeadline_hook = { sec, nsec, tsec, tnsec, clock, job, _ in
             let job = ExecutorJob(unsafeBitCast(job, to: UnownedJob.self))
-
             //TODO: Do something about threshold values tsec, tnsec
             let deadline = sec * 1_000_000_000 + nsec
-            let now = DispatchTime.now().uptimeNanoseconds
-            if deadline <= 0 || now.distance(to: UInt64(deadline)) < 0 {
+            var seconds: Int64 = 0
+            var nanoseconds: Int64 = 0
+            _getTime(&seconds, &nanoseconds, clock)
+            let now = seconds * 1_000_000_000 + nanoseconds
+            let delay = now.distance(to: deadline)
+            if delay <= 0 {
                 SingleThreadedGlobalExecutor.shared.enqueue(job)
             } else {
-                let delay = Int64(now.distance(to: UInt64(deadline)))
-                SingleThreadedGlobalExecutor.shared.enqueue(job, delay: delay.magnitude)
+                SingleThreadedGlobalExecutor.shared.enqueue(job, delay: UInt64(delay.magnitude))
             }
+
+            //print(delay)
+            //print(deadline, sec, nsec, tsec, tnsec, clock)
+            //print(seconds, nanoseconds)
+            //let now = DispatchTime.now().uptimeNanoseconds
+            //print(now)
+            //if deadline <= 0 || now.distance(to: UInt64(deadline)) < 0 {
+            //    SingleThreadedGlobalExecutor.shared.enqueue(job)
+            //} else {
+            //    let delay = Int64(now.distance(to: UInt64(deadline)))
+            //    print("Hook deadline, delay:", delay)
+            //    SingleThreadedGlobalExecutor.shared.enqueue(job, delay: delay.magnitude)
+            //}
         }
         Thread.detachNewThread {
             SingleThreadedGlobalExecutor.shared.run()
@@ -95,6 +110,6 @@ public final class SingleThreadedGlobalExecutor: @unchecked Sendable, SerialExec
     
     @inline(__always)
     internal func enqueue(_ job: consuming ExecutorJob, delay: UInt64) {
-        executor.enqueue(job, delay: .nanoseconds(delay))
+        executor.enqueue(job, delay: delay)
     }
 }

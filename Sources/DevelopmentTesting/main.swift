@@ -8,7 +8,6 @@
 import SebbuConcurrency
 import ConcurrencyRuntimeC
 import Foundation
-import Atomics
 import Dispatch
 import SebbuTSDS
 import Synchronization
@@ -18,7 +17,6 @@ func foo() async {
 }
 
 SingleThreadedGlobalExecutor.shared.setup()
-
 let task = Task {  
     print("Hello from main actor!")
 }
@@ -27,9 +25,9 @@ let executor = MultiThreadedTaskExecutor(numberOfThreads: 16)
 
 let tasks = (0..<executor.numberOfThreads * 10 * 5).map { i in
     Task.detached(executorPreference: executor) {
-        //try! await Task.sleep(for: .seconds(0.1))
-        let start = ContinuousClock.now
-        while start.duration(to: .now) < .seconds(0.1) {}
+        try! await Task.sleep(for: .seconds(3))
+        //let start = ContinuousClock.now
+        //while start.duration(to: .now) < .seconds(0.1) {}
         print("Done", i)
     }
 }

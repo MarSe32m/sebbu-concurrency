@@ -64,24 +64,25 @@ public final class MultiThreadedTaskExecutor: @unchecked Sendable, TaskExecutor 
         }
     }
 
-    public func enqueue(_ job: consuming ExecutorJob, delay: Duration) {
-        precondition(_running.load(ordering: .relaxed), "Tried enqueue jobs on a shutdown MultiThreadedExecutor")
-        let job = DelayedJob(job: job, deadline: .now + delay)
-        _ = unprocessedDelayedJobs.enqueue(job)
+    @inline(__always)
+    public func enqueue(_ job: consuming ExecutorJob, delay: UInt64) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        let delayedJob = DelayedJob(job: job, deadline: now + delay)
+        _ = unprocessedDelayedJobs.enqueue(delayedJob)
+        workers[0].semaphore.signal()
     }
 
     @usableFromInline
-    internal func processTimedJobs() -> ContinuousClock.Instant? {
+    internal func processTimedJobs() -> UInt64? {
         if delayedWorkProcessLock.exchange(true, ordering: .acquiring) { return nil }
         defer { delayedWorkProcessLock.store(false, ordering: .releasing) }
-        let now = ContinuousClock.now
+        let now = DispatchTime.now().uptimeNanoseconds
         while let job = unprocessedDelayedJobs.dequeue() {
             if job.deadline <= now {
                 enqueue(ExecutorJob(job.executorJob))
             } else {
                 delayedJobs.insert(job)
             }
-
         }
         while !delayedJobs.isEmpty && delayedJobs.max!.deadline <= now {
             let job = delayedJobs.removeMax()
@@ -141,7 +142,7 @@ extension MultiThreadedTaskExecutor {
 
         public func run() {
             outer: while running.load(ordering: .relaxed) {
-                var nextTimedWorkDeadline: ContinuousClock.Instant?
+                var nextTimedWorkDeadline: UInt64?
                 for queueIndex in 0..<queues.count {
                     nextTimedWorkDeadline = executor.processTimedJobs()
                     // Process higher priority work
@@ -162,9 +163,7 @@ extension MultiThreadedTaskExecutor {
                 }
 
                 if let nextTimedWorkDeadline {
-                    let duration = ContinuousClock.now.duration(to: nextTimedWorkDeadline)
-                    let nanoseconds = Int(duration.components.seconds * 1_000_000_000 + Int64(duration.components.attoseconds / 1_000_000_000))
-                    _ = semaphore.wait(timeout: .now() + .nanoseconds(nanoseconds))
+                    _ = semaphore.wait(timeout: .init(uptimeNanoseconds: nextTimedWorkDeadline))
                 } else {
                     semaphore.wait()
                 }

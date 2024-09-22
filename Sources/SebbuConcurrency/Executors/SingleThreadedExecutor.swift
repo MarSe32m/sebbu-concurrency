@@ -27,15 +27,16 @@ public final class SingleThreadedExecutor: @unchecked Sendable, Executor {
     }
 
     @inline(__always)
-    public func enqueue(_ job: consuming ExecutorJob, delay: Duration) {
-        let delayedJob = DelayedJob(job: job, deadline: .now + delay)
+    public func enqueue(_ job: consuming ExecutorJob, delay: UInt64) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        let delayedJob = DelayedJob(job: job, deadline: now + delay)
         _ = unprocessedDelayedJobs.enqueue(delayedJob)
         semaphore.signal()
     }
 
     public func run() -> Never {
         while true {
-            var nextTimedWorkDeadline: ContinuousClock.Instant?
+            var nextTimedWorkDeadline: UInt64?
             for queueIndex in 0..<queues.count {
                 nextTimedWorkDeadline = processDelayedJobs()
                 // Process higher priority work
@@ -52,9 +53,7 @@ public final class SingleThreadedExecutor: @unchecked Sendable, Executor {
                 }
             }
             if let nextTimedWorkDeadline {
-                let duration = ContinuousClock.now.duration(to: nextTimedWorkDeadline)
-                let nanoseconds = Int(duration.components.seconds * 1_000_000_000 + Int64(duration.components.attoseconds / 1_000_000_000))
-                _ = semaphore.wait(timeout: .now() + .nanoseconds(nanoseconds))
+                _ = semaphore.wait(timeout: .init(uptimeNanoseconds: nextTimedWorkDeadline))
             } else {
                 semaphore.wait()
             }
@@ -62,8 +61,8 @@ public final class SingleThreadedExecutor: @unchecked Sendable, Executor {
     }
 
     @inlinable
-    internal func processDelayedJobs() -> ContinuousClock.Instant? {
-        let now = ContinuousClock.now
+    internal func processDelayedJobs() -> UInt64? {
+        let now = DispatchTime.now().uptimeNanoseconds
         while let job = unprocessedDelayedJobs.dequeue() {
             if job.deadline <= now {
                 enqueue(ExecutorJob(job.executorJob))
