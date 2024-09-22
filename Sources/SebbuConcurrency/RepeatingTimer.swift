@@ -25,20 +25,22 @@ public final class RepeatingTimer {
     }
 
     /// Delta in seconds
-    public init(delta: Double, queue: DispatchQueue? = nil) {
+    public init(delta: Double, queue: DispatchQueue? = nil, eventHandler: (() -> Void)? = nil) {
         self.timeInterval = DispatchTimeInterval.nanoseconds(Int(delta * 1_000_000_000.0))
         self.queue = queue
         self.timer = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
+        self.eventHandler = eventHandler
         timer.schedule(deadline: .now() + self.timeInterval, repeating: self.timeInterval)
         timer.setEventHandler { [weak self] in
             self?.eventHandler?()
         }
     }
     
-    public init(timeInterval:  DispatchTimeInterval, queue: DispatchQueue? = nil) {
+    public init(timeInterval:  DispatchTimeInterval, queue: DispatchQueue? = nil, eventHandler: (() -> Void)? = nil) {
         self.timeInterval = timeInterval
         self.queue = queue
         self.timer = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
+        self.eventHandler = eventHandler
         timer.schedule(deadline: .now() + self.timeInterval, repeating: self.timeInterval)
         timer.setEventHandler { [weak self] in
             self?.eventHandler?()

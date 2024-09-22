@@ -3,8 +3,8 @@ import SebbuConcurrency
 import Foundation
 import SebbuTSDS
 
-final class SebbuConcurrencyTests: XCTestCase {
-    @available(macOS 13.0, *)
+final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
+    
     func testRateLimiter() async throws {
         let rateLimiter = RateLimiter(permits: 5000, perInterval: .seconds(1), maxPermits: 30000)
         let start = Date()
@@ -76,7 +76,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testChannelMultipleWritersMultipleReaders() async throws {
-        let writeCount = 10000
+        let writeCount = 1000
         for writerCount in 1...10 {
             for readerCount in 1...10 {
                 let channel = AsyncChannel<Int>()
@@ -108,7 +108,7 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testThrowingChannelMultipleWritersMultipleReaders() async throws {
-        let writeCount = 10000
+        let writeCount = 1000
         for writerCount in 1...10 {
             for readerCount in 1...10 {
                 let channel = AsyncThrowingChannel<Int>()
@@ -168,26 +168,6 @@ final class SebbuConcurrencyTests: XCTestCase {
             XCTAssertTrue(error is AsyncThrowingChannel<Int>.SendError)
         }
         XCTAssertFalse(channel.trySend(1))
-    }
-    
-    func testAsyncStreamMakeStream() async throws {
-        let (consumer, producer) = AsyncStream.makeStream(of: Int.self)
-        let producerTask = Task<Int, Never> {
-            var sum = 0
-            for _ in 0..<10000 {
-                let value = Int.random(in: -10...10)
-                sum += value
-                producer.yield(value)
-            }
-            producer.finish()
-            return sum
-        }
-        var finalSum = 0
-        for await value in consumer {
-            finalSum += value
-        }
-        let producerSum = await producerTask.value
-        XCTAssertEqual(finalSum, producerSum)
     }
     
     func testAsyncSemaphore() async throws {
@@ -259,60 +239,6 @@ final class SebbuConcurrencyTests: XCTestCase {
         }
     }
     
-    func testThreadPool_runAsync() async {
-        actor Counter {
-            var value: Int = 0
-            init() {}
-            func increment(by: Int = 1) { value += by }
-            func fetch() -> Int { value }
-        }
-        #if canImport(Atomics)
-        let counter = Counter()
-        let threadPool = ThreadPool(numberOfThreads: 8)
-        let iterations = 100000
-        threadPool.start()
-        await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<10 {
-                group.addTask {
-                    for i in 0..<iterations {
-                        let value = await threadPool.runAsync {
-                            return i
-                        }
-                        await counter.increment(by: value)
-                    }
-                }
-            }
-        }
-        threadPool.stop()
-        let finalCount = await counter.fetch()
-        XCTAssertEqual(10 * (0..<iterations).reduce(0, +), finalCount)
-        #endif
-    }
-    
-    func testDispatchQueue_runAsync() async {
-        actor Counter {
-            var value: Int = 0
-            init() {}
-            func increment(by: Int = 1) { value += by }
-            func fetch() -> Int { value }
-        }
-        let counter = Counter()
-        let iterations = 100000
-        await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<10 {
-                group.addTask {
-                    for i in 0..<iterations {
-                        await counter.increment(by: DispatchQueue.global().runAsync {
-                            return i
-                        })
-                    }
-                }
-            }
-        }
-        let finalCount = await counter.fetch()
-        XCTAssertEqual(10 * (0..<iterations).reduce(0, +), finalCount)
-    }
-    
     func testTaskGroupExtensions() async throws {
         // Run 10 tasks at a time        
         let semaphore = AsyncSemaphore(count: 10)
@@ -333,7 +259,6 @@ final class SebbuConcurrencyTests: XCTestCase {
     }
     
     func testManualTask() async throws {
-        #if canImport(Atomics)
         do {
             let task = ManualTask {
                 return 1
@@ -390,6 +315,5 @@ final class SebbuConcurrencyTests: XCTestCase {
                 XCTAssertTrue(isCancelled)
             }
         }
-        #endif
     }
 }

@@ -5,8 +5,7 @@
 //  Created by Sebastian Toivonen on 31.7.2022.
 //
 
-#if canImport(Atomics)
-import Atomics
+import Synchronization
 
 /// A unit of asynchronous work, similar to Task but ManualTasks are started manually
 ///
@@ -173,7 +172,7 @@ extension ManualTaskStorage where Failure == Error {
 
 extension ManualTaskStorage {
     private final class ContinuationContainer: @unchecked Sendable {
-        enum ContinuationState: UInt8, AtomicValue {
+        enum ContinuationState: UInt8, AtomicRepresentable {
             case notInitialized
             case initializedAndWaitingForResume
             case resumePending
@@ -181,7 +180,7 @@ extension ManualTaskStorage {
         }
         
         var continuation: UnsafeContinuation<Void, Never>?
-        let state = UnsafeAtomic<ContinuationState>.create(.notInitialized)
+        let state: Atomic<ContinuationState> = Atomic(.notInitialized)
         
         func set(_ continuation: UnsafeContinuation<Void, Never>) {
             assert(self.continuation == nil)
@@ -217,8 +216,6 @@ extension ManualTaskStorage {
         
         deinit {
             assert(continuation == nil, "Continuation wasn't resumed before deinitializing the container...")
-            state.destroy()
         }
     }
 }
-#endif

@@ -5,7 +5,7 @@
 //  Created by Sebastian Toivonen on 23.1.2022.
 //
 
-import SebbuTSDS
+import Synchronization
 
 public class RateLimiter: @unchecked Sendable {
     public struct PermitsExhaustedError: Error {
@@ -19,7 +19,7 @@ public class RateLimiter: @unchecked Sendable {
     private var lastPermitRefill: ContinuousClock.Instant = .now
     private var permits: Int
     
-    private let lock = Lock()
+    private let lock = Mutex(())
     
     public init(permits: Int, perInterval: Duration, maxPermits: Int) {
         self.timeInterval = perInterval
@@ -29,11 +29,11 @@ public class RateLimiter: @unchecked Sendable {
     }
     
     public func acquire() throws {
-        try lock.withLock { try _acquire(permits: 1) }
+        try lock.withLock { _ in try _acquire(permits: 1) }
     }
     
     public func acquire(permits: Int) throws {
-        try lock.withLock { try _acquire(permits: permits) }
+        try lock.withLock { _ in try _acquire(permits: permits) }
     }
     
     @inline(__always)

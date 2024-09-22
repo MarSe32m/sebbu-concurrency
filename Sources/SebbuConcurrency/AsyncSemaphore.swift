@@ -7,6 +7,7 @@
 
 import DequeModule
 import SebbuTSDS
+import Synchronization
 
 /// A semaphore that corresponds to a counting semaphore in the synchronous world.
 /// This one is safe to call from multiple tasks. It doesn't block them, only suspends so the system as
@@ -60,33 +61,33 @@ extension AsyncSemaphore {
         var count: Int
         var waitingTasks = Deque<(id: Int, continuation: UnsafeContinuation<Bool, Error>, timeoutTask: Task<Void, Never>?)>()
         var id = 0
-        let lock = Lock()
+        let lock = Mutex(())
         
         init(count: Int) {
             self.count = count
         }
         
         final func wait() async {
-            lock.lock()
+            lock._unsafeLock()
             count -= 1
             if count >= 0 {
-                lock.unlock()
+                lock._unsafeUnlock()
                 return
             }
             self.id += 1
             let id = self.id
             let _ = try! await withUnsafeThrowingContinuation { (cont: UnsafeContinuation<Bool, Error>) in
                 waitingTasks.append((id, cont, nil))
-                lock.unlock()
+                lock._unsafeUnlock()
             }
         }
         
         final func waitUnlessCancelled() async throws {
             try Task.checkCancellation()
-            lock.lock()
+            lock._unsafeLock()
             count -= 1
             if count >= 0 {
-                lock.unlock()
+                lock._unsafeUnlock()
                 return
             }
             
@@ -96,11 +97,11 @@ extension AsyncSemaphore {
             try await withTaskCancellationHandler(operation: {
                 let _ = try await withUnsafeThrowingContinuation { (cont: UnsafeContinuation<Bool, Error>) in
                     waitingTasks.append((id, cont, nil))
-                    lock.unlock()
+                    lock._unsafeUnlock()
                 }
             }, onCancel: {
                 Task {
-                    lock.withLock {
+                    lock.withLock { _ in
                         waitingTasks.removeAll { (identifier, cont, _) in
                             if id == identifier {
                                 cont.resume(throwing: CancellationError())
@@ -115,10 +116,10 @@ extension AsyncSemaphore {
         }
         
         final func wait(for nanoseconds: UInt64) async -> Bool {
-            lock.lock()
+            lock._unsafeLock()
             count -= 1
             if count >= 0 {
-                lock.unlock()
+                lock._unsafeUnlock()
                 return true
             }
             self.id += 1
@@ -128,7 +129,7 @@ extension AsyncSemaphore {
                     do {
                         try await Task.sleep(nanoseconds: nanoseconds)
                     } catch { return }
-                    lock.withLock {
+                    lock.withLock { _ in
                         waitingTasks.removeAll { (identifier, cont, _) in
                             if id == identifier {
                                 cont.resume(returning: false)
@@ -140,16 +141,16 @@ extension AsyncSemaphore {
                     }
                 }
                 waitingTasks.append((id, cont, timeoutTask))
-                lock.unlock()
+                lock._unsafeUnlock()
             }
         }
         
         final func waitUnlessCancelled(for nanoseconds: UInt64) async throws -> Bool {
             try Task.checkCancellation()
-            lock.lock()
+            lock._unsafeLock()
             count -= 1
             if count >= 0 {
-                lock.unlock()
+                lock._unsafeUnlock()
                 return true
             }
             self.id += 1
@@ -160,7 +161,7 @@ extension AsyncSemaphore {
                         do {
                             try await Task.sleep(nanoseconds: nanoseconds)
                         } catch { return }
-                        lock.withLock {
+                        lock.withLock { _ in
                             waitingTasks.removeAll { (identifier, cont, _) in
                                 if id == identifier {
                                     cont.resume(returning: false)
@@ -172,11 +173,11 @@ extension AsyncSemaphore {
                         }
                     }
                     waitingTasks.append((id, cont, timeoutTask))
-                    lock.unlock()
+                    lock._unsafeUnlock()
                 }
             }, onCancel: {
                 Task {
-                    lock.withLock {
+                    lock.withLock { _ in
                         waitingTasks.removeAll { (identifier, cont, timeoutTask) in
                             if id == identifier {
                                 timeoutTask?.cancel()
@@ -193,7 +194,7 @@ extension AsyncSemaphore {
         
         final func signal(count: Int = 1) {
             assert(count > 0)
-            lock.lock()
+            lock._unsafeLock()
             self.count += count
             for _ in 0..<count {
                 if let (_, continuation, timeoutTask) = waitingTasks.popFirst() {
@@ -203,7 +204,7 @@ extension AsyncSemaphore {
                     }
                 }
             }
-            lock.unlock()
+            lock._unsafeUnlock()
         }
     }
 }

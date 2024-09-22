@@ -9,7 +9,6 @@ import SebbuTSDS
 import Dispatch
 import Foundation
 
-#if swift(>=5.9)
 /// Basic serial executor implementation to allow actors to run on custom threads
 /// This implementation is based on a single priority queue that is drained
 /// so it is possible that a very low priority job will never be executed, which is a weakness of this implementation
@@ -111,10 +110,10 @@ public final class BasicPriorityAwareSerialExecutor: @unchecked Sendable, Serial
         UnownedSerialExecutor(ordinary: self)
     }
 }
-#endif
+
 /// Basic serial executor implementation to allow actors to run on custom threads.
 /// This executor doesn't take into account the job priority
-public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
+public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor, TaskExecutor {
     @usableFromInline
     internal let semaphore = DispatchSemaphore(value: 0)
     
@@ -147,7 +146,7 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
         if isDetached { return false }
         var ranJobs = false
         while let job = workQueue.dequeue() {
-            job._runSynchronously(on: asUnownedSerialExecutor())
+            job.runSynchronously(on: asUnownedSerialExecutor())
             ranJobs = true
         }
         return ranJobs
@@ -160,7 +159,7 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
         while true {
             semaphore.wait()
             if let job = workQueue.dequeue() {
-                job._runSynchronously(on: asUnownedSerialExecutor())
+                job.runSynchronously(on: asUnownedSerialExecutor())
             }
         }
     }
@@ -169,7 +168,7 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
         while true {
             semaphore.wait()
             if let job = workQueue.dequeue() {
-                job._runSynchronously(on: asUnownedSerialExecutor())
+                job.runSynchronously(on: asUnownedSerialExecutor())
             }
         }
     }
@@ -184,13 +183,60 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor {
         // Or we might take into account the number of jobs in each priority category. Who knows we'll see...
         // Or we run high priorities when possible. Every 11th iteration we run one mid priority, then every 31st
         // iteration we run one low priority, every 61st iteration we run a background priority etc.
-        workQueue.enqueue(job)
+        //let index = getBucketIndex(priority: job.priority)
+        
+        _ = workQueue.enqueue(job)
         semaphore.signal()
+    }
+}
+
+/// Basic serial executor implementation to allow actors to run on custom threads.
+/// This executor doesn't take into account the job priority
+public final class ManualBasicSerialExecutor: @unchecked Sendable, SerialExecutor, TaskExecutor {
+    @usableFromInline
+    internal let semaphore = DispatchSemaphore(value: 0)
+    
+    @usableFromInline
+    internal let workQueue = MPSCQueue<UnownedJob>()
+    
+    public init() {}
+    
+    /// Drains the executor of any jobs that it might have.
+    /// If the executor is detached, this will be a no-op
+    @discardableResult
+    public func loopOnce() -> Bool {
+        var ranJobs = false
+        while let job = workQueue.dequeue() {
+            job.runSynchronously(on: asUnownedSerialExecutor())
+            ranJobs = true
+        }
+        return ranJobs
+    }
+    
+    /// Parks the current thread and runs jobs indefinitely until the program is terminated.
+    /// Note: You cannot drain a detached `BasicSerialExecutor`.
+    public func loop() -> Never {
+        while true {
+            semaphore.wait()
+            if let job = workQueue.dequeue() {
+                job.runSynchronously(on: asUnownedSerialExecutor())
+            }
+        }
     }
     
     @inlinable
     @inline(__always)
-    public func asUnownedSerialExecutor() -> UnownedSerialExecutor {
-        UnownedSerialExecutor(ordinary: self)
+    public func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
+        //TODO: Once the custom executor proposal lands, we have to take into account the priority of the job
+        // We might have 3 or 4 different queues for different priorities. Then we run them by for example
+        // running 61 high priority, 2 mid priority, 3 high priority, 1 low priority, etc.
+        // Or we might take into account the number of jobs in each priority category. Who knows we'll see...
+        // Or we run high priorities when possible. Every 11th iteration we run one mid priority, then every 31st
+        // iteration we run one low priority, every 61st iteration we run a background priority etc.
+        //let index = getBucketIndex(priority: job.priority)
+        
+        _ = workQueue.enqueue(job)
+        semaphore.signal()
     }
 }

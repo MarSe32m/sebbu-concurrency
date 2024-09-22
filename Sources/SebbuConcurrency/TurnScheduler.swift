@@ -16,7 +16,7 @@ public final class TurnScheduler: @unchecked Sendable {
     }
     
     @usableFromInline
-    internal let queue = MPSCQueue<UnsafeContinuation<Void, Never>>(cacheSize: 128)
+    internal let queue = MPSCQueue<ContinuationContainer<Void, Error>>(cacheSize: 128)
     
     public init(amount: Int, interval: Double) {
         self.timeInterval = interval
@@ -32,12 +32,24 @@ public final class TurnScheduler: @unchecked Sendable {
     
     @inlinable
     public func wait() async {
-        await withUnsafeContinuation { queue.enqueue($0) }
+        let container = ContinuationContainer<Void, Error>()
+        try? await withUnsafeThrowingContinuation { 
+            container.set($0)
+            _ = queue.enqueue(container)
+        }
     }
     
     @inlinable
     public func waitUnlessCancelled() async throws {
-        fatalError("NOT IMPLEMENTED")
+        let container = ContinuationContainer<Void, Error>()
+        try await withTaskCancellationHandler {
+            try await withUnsafeThrowingContinuation { 
+                container.set($0)
+                _ = queue.enqueue(container)
+            }
+        } onCancel: {
+            container.resume(throwing: CancellationError())
+        }
     }
     
     deinit {

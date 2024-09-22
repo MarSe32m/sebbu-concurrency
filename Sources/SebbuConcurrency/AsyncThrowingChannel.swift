@@ -7,10 +7,11 @@
 
 import SebbuTSDS
 import DequeModule
+import Synchronization
 
 /// Channel is an object that can be used to communicate between tasks. Unlike AsyncStream,
 /// multiple tasks can send and receive items from the Channel.
-public struct AsyncThrowingChannel<Element>: @unchecked Sendable {
+public struct AsyncThrowingChannel<Element: Sendable>: @unchecked Sendable {
     public enum BufferingStrategy {
         /// Add the items to the buffer at no limit.
         case unbounded
@@ -55,12 +56,12 @@ public struct AsyncThrowingChannel<Element>: @unchecked Sendable {
     /// the element might or might not be enqueued.
     @inlinable
     @discardableResult
-    public func trySend(_ value: Element) -> Bool {
+    public func trySend(_ value: sending Element) -> Bool {
         _storage.trySend(value)
     }
     
     @inlinable
-    public func send(_ value: Element) async throws {
+    public func send(_ value: sending Element) async throws {
         try await _storage.send(value)
     }
     
@@ -105,7 +106,7 @@ extension AsyncThrowingChannel {
     @usableFromInline
     internal final class _AsyncThrowingChannelStorage: @unchecked Sendable {
         @usableFromInline
-        internal let _lock = Lock()
+        internal let _lock = Mutex(())
 
         @usableFromInline
         internal var _buffer = Deque<Element>()
@@ -125,25 +126,25 @@ extension AsyncThrowingChannel {
         public let bufferingStrategy: BufferingStrategy
 
         public var isClosed: Bool {
-            _lock.withLock {
+            _lock.withLock { _ in
                 _isClosed
             }
         }
 
         public var count: Int {
-            _lock.withLock {
+            _lock.withLock { _ in
                 _buffer.count
             }
         }
 
         public var consumerCount: Int {
-            _lock.withLock {
+            _lock.withLock { _ in
                 _consumers.count
             }
         }
 
         public var producerCount: Int {
-            _lock.withLock {
+            _lock.withLock { _ in
                 _producers.count
             }
         }
@@ -157,18 +158,18 @@ extension AsyncThrowingChannel {
 
         @inlinable
         @discardableResult
-        public final func trySend(_ value: Element) -> Bool {
-            _lock.lock()
+        public final func trySend(_ value: sending Element) -> Bool {
+            _lock._unsafeLock()
             if _isClosed {
-                _lock.unlock()
+                _lock._unsafeUnlock()
                 return false
             }
             if let consumer = _consumers.popFirst() {
-                _lock.unlock()
+                _lock._unsafeUnlock()
                 consumer.continuation.resume(returning: value)
                 return true
             }
-            defer { _lock.unlock() }
+            defer { _lock._unsafeUnlock() }
             switch bufferingStrategy {
             case .unbounded:
                 _buffer.append(value)
@@ -183,27 +184,27 @@ extension AsyncThrowingChannel {
         }
 
         @inlinable
-        public final func send(_ value: Element) async throws {
-            _lock.lock()
+        public final func send(_ value: sending Element) async throws {
+            _lock._unsafeLock()
             if _isClosed {
-                _lock.unlock()
+                _lock._unsafeUnlock()
                 throw SendError.closed
             }
             if let consumer = _consumers.popFirst() {
-                _lock.unlock()
+                _lock._unsafeUnlock()
                 consumer.continuation.resume(returning: value)
                 return
             }
             switch bufferingStrategy {
             case .unbounded:
                 _buffer.append(value)
-                _lock.unlock()
+                _lock._unsafeUnlock()
                 return
             case .bounded(let maxCapacity):
                 let count = _buffer.count
                 if count < maxCapacity {
                     _buffer.append(value)
-                    _lock.unlock()
+                    _lock._unsafeUnlock()
                     return
                 }
                 let id = _currentId + 1
@@ -212,14 +213,14 @@ extension AsyncThrowingChannel {
                 try await withTaskCancellationHandler(operation: {
                     try await withUnsafeThrowingContinuation({ (continuation: UnsafeContinuation<Void, Error>) in
                         _producers.append((id: id, continuation: continuation, value: value))
-                        _lock.unlock()
+                        _lock._unsafeUnlock()
                     })
                 }, onCancel: {
                     // This way we ensure that the operation above is perfomed before the cancel block.
                     // But this happens only on cancellation (which should be rare/not happen 1000 times per second)
                     // so I think this is a fine approach for now.
                     Task {
-                        _lock.withLock {
+                        _lock.withLock { _ in
                             _producers.removeAll { (identifier, continuation, _) in
                                 if id == identifier {
                                     continuation.resume(throwing: CancellationError())
@@ -235,7 +236,7 @@ extension AsyncThrowingChannel {
         
         @inlinable
         public final func tryReceive() -> Element? {
-            _lock.withLock {
+            _lock.withLock { _ in
                 if let value = _buffer.popFirst() {
                     if let (_, continuation, producerValue) = _producers.popFirst() {
                         _buffer.append(producerValue)
@@ -248,17 +249,17 @@ extension AsyncThrowingChannel {
         }
 
         public final func receive() async -> Element? {
-            _lock.lock()
+            _lock._unsafeLock()
             if let value = _buffer.popFirst() {
                 if let (_, continuation, producerValue) = _producers.popFirst() {
                     _buffer.append(producerValue)
                     continuation.resume()
                 }
-                _lock.unlock()
+                _lock._unsafeUnlock()
                 return value
             }
             if _isClosed {
-                _lock.unlock()
+                _lock._unsafeUnlock()
                 return nil
             }
             
@@ -269,14 +270,14 @@ extension AsyncThrowingChannel {
                 return await withUnsafeContinuation { (continuation: UnsafeContinuation<Element?, Never>) in
                     _consumers.append((id: id, continuation: continuation))
                     // This is fine, since it is guaranteed that this closure is executed in the same context as the calling function and thus this doesn't switch threads.
-                    _lock.unlock()
+                    _lock._unsafeUnlock()
                 }
             } onCancel: {
                 // This way we ensure that the operation above is perfomed before the cancel block.
                 // But this happens only on cancellation (which should be rare/not happen 1000 times per second)
                 // so I think this is a fine approach for now.
                 Task {
-                    _lock.withLock {
+                    _lock.withLock { _ in
                         _consumers.removeAll { (identifier, continuation) in
                             if id == identifier {
                                 continuation.resume(returning: nil)
@@ -291,7 +292,7 @@ extension AsyncThrowingChannel {
 
         @inlinable
         public final func close() {
-            _lock.withLock {
+            _lock.withLock { _ in
                 _isClosed = true
                 while let (_, continuation) = _consumers.popFirst() {
                     continuation.resume(returning: nil)

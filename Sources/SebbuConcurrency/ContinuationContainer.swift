@@ -5,13 +5,12 @@
 //  Created by Sebastian Toivonen on 16.7.2023.
 //
 
-#if canImport(Atomics)
-import Atomics
+import Synchronization
 
 //TODO: Documentation
 public final class ContinuationContainer<T, E>: @unchecked Sendable where E: Error {
     @usableFromInline
-    enum ContinuationState: UInt8, AtomicValue {
+    enum ContinuationState: UInt8, AtomicRepresentable {
         case notInitialized
         case initializedAndWaitingForResume
         case resumePending
@@ -22,7 +21,7 @@ public final class ContinuationContainer<T, E>: @unchecked Sendable where E: Err
     var continuation: UnsafeContinuation<T, E>?
     
     @usableFromInline
-    let state = UnsafeAtomic<ContinuationState>.create(.notInitialized)
+    let state: Atomic<ContinuationState> = Atomic(.notInitialized)
     
     @usableFromInline
     var value: T?
@@ -56,7 +55,7 @@ public final class ContinuationContainer<T, E>: @unchecked Sendable where E: Err
     }
     
     @inlinable
-    public func resume(returning value: T) {
+    public func resume(returning value: sending T) {
         self.value = value
         var (exchanged, currentState) = state.compareExchange(expected: .notInitialized, desired: .resumePending, ordering: .acquiring)
         // If the exchange succeeds, we will just wait for the continuation and they will immediately resume it
@@ -106,8 +105,7 @@ public final class ContinuationContainer<T, E>: @unchecked Sendable where E: Err
     }
     
     deinit {
-        assert(continuation == nil, "Continuation wasn't resumed before deinitializing the container...")
-        state.destroy()
+        precondition(continuation == nil, "Continuation wasn't resumed before deinitializing the container...")
     }
 }
 
@@ -117,4 +115,3 @@ extension ContinuationContainer where T == Void {
         resume(returning: ())
     }
 }
-#endif
