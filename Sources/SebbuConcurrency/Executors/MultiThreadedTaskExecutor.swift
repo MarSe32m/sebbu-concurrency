@@ -24,7 +24,7 @@ public final class MultiThreadedTaskExecutor: @unchecked Sendable, TaskExecutor 
     internal var delayedJobs: Heap<DelayedJob> = Heap()
 
     @usableFromInline
-    internal let unprocessedDelayedJobs: MPSCQueue<DelayedJob> = MPSCQueue(cacheSize: 128)
+    internal let unprocessedDelayedJobs: MPSCQueue<DelayedJob> = MPSCQueue(cacheSize: 1024)
 
     @usableFromInline
     internal let delayedWorkProcessLock: Atomic<Bool> = Atomic(false)

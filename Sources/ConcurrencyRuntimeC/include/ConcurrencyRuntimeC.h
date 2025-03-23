@@ -186,7 +186,83 @@
 #define SWIFT_INDIRECT_RESULT
 #endif
 
-typedef struct _Job* JobRef;
+#if !defined(__swift__) && __has_feature(ptrauth_calls)
+#include <ptrauth.h>
+#endif
+#ifndef __ptrauth_objc_isa_pointer
+#define __ptrauth_objc_isa_pointer
+#endif
+
+#include <inttypes.h>
+#include <stdbool.h>
+#include <stdlib.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef SWIFT_CC
+#define SWIFT_CC(x)     SWIFT_CC_##x
+#define SWIFT_CC_swift  __attribute__((swiftcall))
+#endif
+
+#ifndef SWIFT_RUNTIME_ATTRIBUTE_NORETURN
+#define SWIFT_RUNTIME_ATTRIBUTE_NORETURN __attribute__((noreturn))
+#endif
+
+// -- C versions of types executors might need ---------------------------------
+
+/// Represents a Swift type
+typedef struct SwiftHeapMetadata SwiftHeapMetadata;
+
+/// Jobs have flags, which currently encode a kind and a priority
+typedef uint32_t SwiftJobFlags;
+
+typedef size_t SwiftJobKind;
+enum {
+  SwiftTaskJobKind = 0,
+
+  // Job kinds >= 192 are private to the implementation
+  SwiftFirstReservedJobKind = 192,
+};
+
+typedef size_t SwiftJobPriority;
+enum {
+  SwiftUserInteractiveJobPriority = 0x21, /* UI */
+  SwiftUserInitiatedJobPriority   = 0x19, /* IN */
+  SwiftDefaultJobPriority         = 0x15, /* DEF */
+  SwiftUtilityJobPriority         = 0x11, /* UT */
+  SwiftBackgroundJobPriority      = 0x09, /* BG */
+  SwiftUnspecifiedJobPriority     = 0x00, /* UN */
+};
+
+enum { SwiftJobPriorityBucketCount = 5 };
+
+static inline int swift_priority_getBucketIndex(SwiftJobPriority priority) {
+  if (priority > SwiftUserInitiatedJobPriority)
+    return 0;
+  else if (priority > SwiftDefaultJobPriority)
+    return 1;
+  else if (priority > SwiftUtilityJobPriority)
+    return 2;
+  else if (priority > SwiftBackgroundJobPriority)
+    return 3;
+  else
+    return 4;
+}
+
+/// Used by the Concurrency runtime to represent a job.  The `schedulerPrivate`
+/// field may be freely used by the executor implementation.
+typedef struct {
+  SwiftHeapMetadata const *_Nonnull __ptrauth_objc_isa_pointer metadata;
+  uintptr_t refCounts;
+  void *_Nullable schedulerPrivate[2];
+  SwiftJobFlags flags;
+} __attribute__((aligned(2 * sizeof(void *)))) SwiftJob;
+
+
+typedef struct SwiftJob* SwiftJobRef;
+//typedef struct _Job* JobRef;
 typedef struct _Executor ExecutorRef;
 
 //typedef __attribute__((aligned(2 * alignof(void *)))) struct {
@@ -198,19 +274,19 @@ typedef struct _Executor ExecutorRef;
 
 
 /// A hook to take over global enqueuing.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(JobRef _Nonnull job);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(SwiftJobRef _Nonnull job);
 __attribute__((swift_attr("nonisolated(unsafe)")))
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void (* _Nullable swift_task_enqueueGlobal_hook)(
-    JobRef _Nonnull job, swift_task_enqueueGlobal_original _Nonnull original);
+    SwiftJobRef _Nonnull job, swift_task_enqueueGlobal_original _Nonnull original);
 
 /// A hook to take over global enqueuing with delay.
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_original)(
-    unsigned long long delay, JobRef _Nonnull job);
+    unsigned long long delay, SwiftJobRef _Nonnull job);
 __attribute__((swift_attr("nonisolated(unsafe)")))
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void (* _Nullable swift_task_enqueueGlobalWithDelay_hook)(
-    unsigned long long delay, JobRef _Nonnull job,
+    unsigned long long delay, SwiftJobRef _Nonnull job,
     swift_task_enqueueGlobalWithDelay_original _Nonnull original);
 
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(
@@ -218,7 +294,7 @@ typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(
     long long nsec,
     long long tsec,
     long long tnsec,
-    int clock, JobRef _Nonnull job);
+    int clock, SwiftJobRef _Nonnull job);
 __attribute__((swift_attr("nonisolated(unsafe)")))
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void (* _Nullable swift_task_enqueueGlobalWithDeadline_hook)(
@@ -226,15 +302,15 @@ SWIFT_CC(swift) void (* _Nullable swift_task_enqueueGlobalWithDeadline_hook)(
     long long nsec,
     long long tsec,
     long long tnsec,
-    int clock, JobRef _Nonnull job,
+    int clock, SwiftJobRef _Nonnull job,
     swift_task_enqueueGlobalWithDeadline_original _Nonnull original);
 
 /// A hook to take over main executor enqueueing.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(JobRef _Nonnull job);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(SwiftJobRef _Nonnull job);
 __attribute__((swift_attr("nonisolated(unsafe)")))
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void (* _Nullable swift_task_enqueueMainExecutor_hook)(
-    JobRef _Nonnull job, swift_task_enqueueMainExecutor_original _Nonnull original);
+    SwiftJobRef _Nonnull job, swift_task_enqueueMainExecutor_original _Nonnull original);
 
 /// A hook to take over the main queue draining
 typedef SWIFT_CC(swift) void (*swift_task_asyncMainDrainQueue_original)();

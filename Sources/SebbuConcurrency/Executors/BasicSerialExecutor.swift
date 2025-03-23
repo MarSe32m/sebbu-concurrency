@@ -118,7 +118,7 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor, Tas
     internal let semaphore = DispatchSemaphore(value: 0)
     
     @usableFromInline
-    internal let workQueue = MPSCQueue<UnownedJob>()
+    internal let workQueue = MPSCQueue<ExecutorJob>()
     
     public let isDetached: Bool
     
@@ -176,7 +176,6 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor, Tas
     @inlinable
     @inline(__always)
     public func enqueue(_ job: consuming ExecutorJob) {
-        let job = UnownedJob(job)
         //TODO: Once the custom executor proposal lands, we have to take into account the priority of the job
         // We might have 3 or 4 different queues for different priorities. Then we run them by for example
         // running 61 high priority, 2 mid priority, 3 high priority, 1 low priority, etc.
@@ -184,7 +183,6 @@ public final class BasicSerialExecutor: @unchecked Sendable, SerialExecutor, Tas
         // Or we run high priorities when possible. Every 11th iteration we run one mid priority, then every 31st
         // iteration we run one low priority, every 61st iteration we run a background priority etc.
         //let index = getBucketIndex(priority: job.priority)
-        
         _ = workQueue.enqueue(job)
         semaphore.signal()
     }
@@ -197,7 +195,7 @@ public final class ManualBasicSerialExecutor: @unchecked Sendable, SerialExecuto
     internal let semaphore = DispatchSemaphore(value: 0)
     
     @usableFromInline
-    internal let workQueue = MPSCQueue<UnownedJob>()
+    internal let workQueue = MPSCQueue<ExecutorJob>()
     
     public init() {}
     
@@ -227,7 +225,6 @@ public final class ManualBasicSerialExecutor: @unchecked Sendable, SerialExecuto
     @inlinable
     @inline(__always)
     public func enqueue(_ job: consuming ExecutorJob) {
-        let job = UnownedJob(job)
         //TODO: Once the custom executor proposal lands, we have to take into account the priority of the job
         // We might have 3 or 4 different queues for different priorities. Then we run them by for example
         // running 61 high priority, 2 mid priority, 3 high priority, 1 low priority, etc.
