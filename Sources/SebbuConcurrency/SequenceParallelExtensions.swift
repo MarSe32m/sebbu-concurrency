@@ -11,6 +11,7 @@ import SebbuTSDS
 import Synchronization
 
 public extension Sequence where Element: Sendable {
+    @inlinable
     func parallelMap<T>(parallelism: Int = ProcessInfo.processInfo.activeProcessorCount,
                         blockSize: Int = 1,
                         _ transform: @Sendable @escaping (Element) -> T) -> [T] {
@@ -88,6 +89,7 @@ public extension Sequence where Element: Sendable {
         return results
     }
     
+    @inlinable
     func parallelForEach(parallelism: Int = ProcessInfo.processInfo.activeProcessorCount,
                          blockSize: Int = 1,
                          _ body: @Sendable @escaping (Element) -> Void) {
@@ -148,6 +150,7 @@ public extension Sequence where Element: Sendable {
 }
 
 public extension Array where Element: Sendable {
+    @inlinable
     func parallelMap<T>(_ transform: @Sendable (Element) -> T) -> [T] {
         if self.isEmpty { return [] }
         return [T].init(unsafeUninitializedCapacity: count) { buffer, initializedCount in
@@ -159,6 +162,7 @@ public extension Array where Element: Sendable {
         }
     }
     
+    @inlinable
     func parallelMap<T>(parallelism: Int,
                         _ transform: @Sendable (Element) -> T) -> [T] {
         if self.isEmpty { return [] }
@@ -177,6 +181,7 @@ public extension Array where Element: Sendable {
         }
     }
     
+    @inlinable
     func parallelForEach(_ body: @Sendable (Element) -> Void) {
         if self.isEmpty { return }
         DispatchQueue.concurrentPerform(iterations: count) { i in
@@ -184,6 +189,7 @@ public extension Array where Element: Sendable {
         }
     }
     
+    @inlinable
     func parallelForEach(parallelism: Int,
                          _ body: @Sendable (Element) -> Void) {
         if self.isEmpty { return }
