@@ -5,6 +5,27 @@ import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
     
+    func testParallelMap() {
+        let range = (0..<1_000_000)
+        let array = Array(range)
+        let mapped = range.map { $0 * $0 }
+        
+        let rangeParallelMapped1 = range.parallelMap { $0 * $0 }
+        let rangeParallelMapped2 = range.parallelMap(parallelism: 2) { $0 * $0 }
+        let rangeParallelMapped3 = range.parallelMap(blockSize: .random(in: 2...10)) { $0 * $0 }
+        let rangeParallelMapped4 = range.parallelMap(parallelism: 3, blockSize: .random(in: 2...10)) { $0 * $0 }
+        XCTAssertEqual(mapped, rangeParallelMapped1)
+        XCTAssertEqual(mapped, rangeParallelMapped2)
+        XCTAssertEqual(mapped, rangeParallelMapped3)
+        XCTAssertEqual(mapped, rangeParallelMapped4)
+        
+        let arrayParallelMapped1 = array.parallelMap { $0 * $0 }
+        let arrayParallelMapped2 = array.parallelMap(parallelism: 2) { $0 * $0 }
+        XCTAssertEqual(mapped, arrayParallelMapped1)
+        XCTAssertEqual(mapped, arrayParallelMapped2)
+        
+    }
+    
     func testRateLimiter() async throws {
         let rateLimiter = RateLimiter(permits: 5000, perInterval: .seconds(1), maxPermits: 30000)
         let start = Date()
