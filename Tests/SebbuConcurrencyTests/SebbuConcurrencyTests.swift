@@ -24,6 +24,12 @@ final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(mapped, arrayParallelMapped1)
         XCTAssertEqual(mapped, arrayParallelMapped2)
         
+        let slice = array[0..<1_000]
+        let sliceParallelMapped1 = slice.parallelMap { $0 * $0 }
+        let sliceParallelMapped2 = slice.parallelMap(parallelism: 2) { $0 * $0 }
+        XCTAssertEqual(slice.map { $0 * $0 }, sliceParallelMapped1)
+        XCTAssertEqual(slice.map { $0 * $0 }, sliceParallelMapped2)
+        
     }
     
     func testRateLimiter() async throws {
