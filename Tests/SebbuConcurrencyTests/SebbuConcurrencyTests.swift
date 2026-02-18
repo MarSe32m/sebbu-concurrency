@@ -4,6 +4,39 @@ import Foundation
 import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
+    func testTaskSynchronously() {
+        let result = Task.synchronouslyDetached {
+            await withTaskExecutorPreference(globalConcurrentExecutor) {
+                await withTaskGroup { group in
+                    for i in 0..<1000 {
+                        group.addTask {
+                            for j in 1..<1000 {
+                                if i % j == 35 {
+                                    return i - j
+                                }
+                            }
+                            return i
+                        }
+                    }
+                    return await group.reduce(0, +)
+                }
+            }
+        }
+        XCTAssertEqual(result, 346007)
+    }
+    
+    func testTaskSynchronouslyThrowsError() {
+        struct _Error: Error {}
+        XCTAssertThrowsError(try Task.synchronouslyDetached {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await Task.sleep(for: .seconds(1))
+            return 1
+        })
+        XCTAssertThrowsError(try Task.synchronouslyDetached {
+            throw _Error()
+        })
+    }
+    
     func testRateLimiter() async throws {
         let rateLimiter = RateLimiter(permits: 5000, perInterval: .seconds(1), maxPermits: 30000)
         let start = Date()
