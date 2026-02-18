@@ -55,7 +55,7 @@ internal final class _SynchronousExecutor<T, E: Error>: @unchecked Sendable, Tas
     init() {}
     
     deinit {
-        result.load(ordering: .relaxed).deallocate()
+        result.load(ordering: .sequentiallyConsistent).deallocate()
     }
     
     @inlinable

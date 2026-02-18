@@ -5,12 +5,12 @@ import SebbuTSDS
 
 final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
     func testTaskSynchronously() {
-        let result = Task.synchronouslyDetached {
-            await withTaskExecutorPreference(globalConcurrentExecutor) {
+        let thread = Thread {
+            let result = Task.synchronouslyDetached {
                 await withTaskGroup { group in
-                    for i in 0..<1000 {
+                    for i in 0..<1_000 {
                         group.addTask {
-                            for j in 1..<1000 {
+                            for j in 1..<1_000 {
                                 if i % j == 35 {
                                     return i - j
                                 }
@@ -21,8 +21,10 @@ final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
                     return await group.reduce(0, +)
                 }
             }
+            XCTAssertEqual(result, 346007)
         }
-        XCTAssertEqual(result, 346007)
+        thread.start()
+        while !thread.isFinished {}
     }
     
     func testTaskSynchronouslyThrowsError() {
