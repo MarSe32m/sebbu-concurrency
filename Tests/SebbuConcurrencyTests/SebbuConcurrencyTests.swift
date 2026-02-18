@@ -29,14 +29,21 @@ final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
     
     func testTaskSynchronouslyThrowsError() {
         struct _Error: Error {}
-        XCTAssertThrowsError(try Task.synchronouslyDetached {
-            withUnsafeCurrentTask { $0?.cancel() }
-            try await Task.sleep(for: .seconds(1))
-            return 1
-        })
-        XCTAssertThrowsError(try Task.synchronouslyDetached {
-            throw _Error()
-        })
+        let thread = Thread {
+            do {
+                XCTAssertThrowsError(try Task.synchronouslyDetached {
+                    withUnsafeCurrentTask { $0?.cancel() }
+                    try await Task.sleep(for: .seconds(1))
+                    return 1
+                })
+                XCTAssertThrowsError(try Task.synchronouslyDetached {
+                    throw _Error()
+                })
+                throw _Error()
+            } catch {}
+        }
+        thread.start()
+        while !thread.isFinished {}
     }
     
     func testRateLimiter() async throws {
