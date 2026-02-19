@@ -13,10 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-         - tag: 6.1-RELEASE
-           branch: swift-6.1-release
-         #- tag: DEVELOPMENT-SNAPSHOT-2023-07-10-a
-         #  branch: development
+         #- tag: 6.1-RELEASE
+         #  branch: swift-6.1-release
+         - tag: 6.2.3-RELEASE
+           branch: swift-6.2.3-release
            
     steps:
     - uses: compnerd/gha-setup-swift@main
