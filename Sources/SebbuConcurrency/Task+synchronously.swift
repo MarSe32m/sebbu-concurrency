@@ -10,17 +10,79 @@ import Synchronization
 import SebbuTSDS
 
 public extension Task {
-    /// Run asynchronous closure synchronously on the current thread. This function cannot be called from an asynchronous context,
-    /// even if you are currently in a synchronous function.
+    /// Runs the given operation synchronously
+    /// as part of a new _unstructured_ _detached_ top-level task.
+    ///
+    /// This method cannot be called from an asynchronous context.
+    ///
+    /// - Parameters:
+    ///   - name: Human readable name of the task.
+    ///   - taskExecutor: The task executor that the child task should be started on and keep using.
+    ///      Explicitly passing `nil` as the executor preference is equivalent to no preference,
+    ///      and effectively means to inherit the outer context's executor preference.
+    ///      You can also pass the ``globalConcurrentExecutor`` global executor explicitly.
+    ///   - priority: The priority of the operation task.
+    ///   - operation: The operation to perform.
+    /// - Throws: If the `operation` throws an error
+    /// - Returns: The value returned by `operation`.
     @available(*, noasync)
-    static func synchronouslyDetached(_ body: @escaping @Sendable () async throws(Failure) -> Success) throws(Failure) -> Success {
+    static func synchronouslyDetached(name: String? = nil,
+                                      executorPreference taskExecutor: (any TaskExecutor)? = nil,
+                                      priority: TaskPriority? = nil,
+                                      operation: @escaping @Sendable () async throws(Failure) -> Success) throws(Failure) -> Success {
         withUnsafeCurrentTask {
             precondition($0 == nil, "Running Task.synchronouslyDetached inside a Task")
         }
         let executor = _SynchronousExecutor<Success, Failure>()
-        let _ = Task<Void, Never>.detached(executorPreference: executor) {
+        let _ = Task<Void, Never>.detached(name: name, executorPreference: executor, priority: priority) {
             do {
-                let result = try await body()
+                let result = try await withTaskExecutorPreference(taskExecutor, operation: operation)
+                executor.result.load(ordering: .sequentiallyConsistent).initialize(to: (result, .none))
+            } catch let error as Failure {
+                executor.result.load(ordering: .sequentiallyConsistent).initialize(to: (.none, error))
+            } catch {
+                fatalError("Unreachable")
+            }
+            executor.finish()
+        }
+        executor.run()
+        let (value, error) = executor.result.load(ordering: .sequentiallyConsistent).move()
+        if let value {
+            return value
+        }
+        if let error {
+            throw error
+        }
+        fatalError("Unreachable")
+    }
+    
+    /// Runs immediately and synchronously the given `operation`.
+    ///
+    /// This method cannot be called from an asynchronous context.
+    ///
+    /// - Parameters:
+    ///   - name: Human readable name of the task.
+    ///   - taskExecutor: The task executor that the child task should be started on and keep using.
+    ///      Explicitly passing `nil` as the executor preference is equivalent to no preference,
+    ///      and effectively means to inherit the outer context's executor preference.
+    ///      You can also pass the ``globalConcurrentExecutor`` global executor explicitly.
+    ///   - priority: The priority of the operation task.
+    ///   - operation: The operation to perform.
+    /// - Throws: If the `operation` throws an error
+    /// - Returns: The value returned by `operation`.
+    @available(*, noasync)
+    @available(macOS 26.0, *)
+    static func synchronouslyImmediateDetached(name: String? = nil,
+                                      executorPreference taskExecutor: (any TaskExecutor)? = nil,
+                                      priority: TaskPriority? = nil,
+                                      operation: @escaping @Sendable () async throws(Failure) -> Success) throws(Failure) -> Success {
+        withUnsafeCurrentTask {
+            precondition($0 == nil, "Running Task.synchronouslyDetached inside a Task")
+        }
+        let executor = _SynchronousExecutor<Success, Failure>()
+        let _ = Task<Void, Never>.immediateDetached(name: name, priority: priority, executorPreference: executor) {
+            do {
+                let result = try await withTaskExecutorPreference(taskExecutor, operation: operation)
                 executor.result.load(ordering: .sequentiallyConsistent).initialize(to: (result, .none))
             } catch let error as Failure {
                 executor.result.load(ordering: .sequentiallyConsistent).initialize(to: (.none, error))

@@ -27,6 +27,30 @@ final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
         while !thread.isFinished {}
     }
     
+    @available(macOS 26.0, *)
+    func testTaskSynchronouslyImmediate() {
+        let thread = Thread {
+            let result = Task.synchronouslyImmediateDetached {
+                await withTaskGroup { group in
+                    for i in 0..<1_000 {
+                        group.addTask {
+                            for j in 1..<1_000 {
+                                if i % j == 35 {
+                                    return i - j
+                                }
+                            }
+                            return i
+                        }
+                    }
+                    return await group.reduce(0, +)
+                }
+            }
+            XCTAssertEqual(result, 346007)
+        }
+        thread.start()
+        while !thread.isFinished {}
+    }
+    
     func testTaskSynchronouslyThrowsError() {
         struct _Error: Error {}
         let thread = Thread {
@@ -37,6 +61,26 @@ final class SebbuConcurrencyTests: XCTestCase, @unchecked Sendable {
                     return 1
                 })
                 XCTAssertThrowsError(try Task.synchronouslyDetached {
+                    throw _Error()
+                })
+                throw _Error()
+            } catch {}
+        }
+        thread.start()
+        while !thread.isFinished {}
+    }
+    
+    @available(macOS 26.0, *)
+    func testTaskSynchronouslyImmediateThrowsError() {
+        struct _Error: Error {}
+        let thread = Thread {
+            do {
+                XCTAssertThrowsError(try Task.synchronouslyImmediateDetached {
+                    withUnsafeCurrentTask { $0?.cancel() }
+                    try await Task.sleep(for: .seconds(1))
+                    return 1
+                })
+                XCTAssertThrowsError(try Task.synchronouslyImmediateDetached {
                     throw _Error()
                 })
                 throw _Error()
