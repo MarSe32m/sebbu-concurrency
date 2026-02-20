@@ -26,10 +26,12 @@ public extension Task {
     /// - Throws: If the `operation` throws an error
     /// - Returns: The value returned by `operation`.
     @available(*, noasync)
-    static func synchronouslyDetached(name: String? = nil,
-                                      executorPreference taskExecutor: (any TaskExecutor)? = nil,
-                                      priority: TaskPriority? = nil,
-                                      operation: @escaping @Sendable () async throws(Failure) -> Success) throws(Failure) -> Success {
+    static func synchronouslyDetached(
+        name: String? = nil,
+        executorPreference taskExecutor: (any TaskExecutor)? = nil,
+        priority: TaskPriority? = nil,
+        operation: @escaping @Sendable () async throws(Failure) -> Success
+    ) throws(Failure) -> Success {
         withUnsafeCurrentTask {
             precondition($0 == nil, "Running Task.synchronouslyDetached inside a Task")
         }
@@ -72,10 +74,12 @@ public extension Task {
     /// - Returns: The value returned by `operation`.
     @available(*, noasync)
     @available(macOS 26.0, *)
-    static func synchronouslyImmediateDetached(name: String? = nil,
-                                      executorPreference taskExecutor: (any TaskExecutor)? = nil,
-                                      priority: TaskPriority? = nil,
-                                      operation: @escaping @Sendable () async throws(Failure) -> Success) throws(Failure) -> Success {
+    static func synchronouslyImmediateDetached(
+        name: String? = nil,
+        executorPreference taskExecutor: (any TaskExecutor)? = nil,
+        priority: TaskPriority? = nil,
+        operation: @escaping @Sendable () async throws(Failure) -> Success
+    ) throws(Failure) -> Success {
         withUnsafeCurrentTask {
             precondition($0 == nil, "Running Task.synchronouslyDetached inside a Task")
         }
@@ -104,7 +108,7 @@ public extension Task {
 }
 
 @usableFromInline
-internal final class _SynchronousExecutor<T, E: Error>: @unchecked Sendable, TaskExecutor {
+internal final class _SynchronousExecutor<T, E: Error>: @unchecked Sendable, TaskExecutor, SerialExecutor {
     @usableFromInline
     let semaphore: DispatchSemaphore = .init(value: 0)
     @usableFromInline
@@ -114,8 +118,10 @@ internal final class _SynchronousExecutor<T, E: Error>: @unchecked Sendable, Tas
     @usableFromInline
     let result: Atomic<UnsafeMutablePointer<(T?, E?)>> = .init(.allocate(capacity: 1))
     
+    @inlinable
     init() {}
     
+    @inlinable
     deinit {
         result.load(ordering: .sequentiallyConsistent).deallocate()
     }
